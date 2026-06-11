@@ -22,6 +22,7 @@ const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({ origin: '*' }));
 app.use(express.json());
@@ -52,14 +53,14 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  console.log(`🎰 Player connected: ${socket.user.username}`);
+  console.log(🎰 Player connected: ${socket.user.username});
   registerGameHandlers(io, socket);
-  socket.on('disconnect', () => console.log(`👋 Player disconnected: ${socket.user.username}`));
+  socket.on('disconnect', () => console.log(👋 Player disconnected: ${socket.user.username}));
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`🚀 Foretell Backend running on port ${PORT}`);
+  console.log(🚀 Foretell Backend running on port ${PORT});
   initGames(io);
 });
 
