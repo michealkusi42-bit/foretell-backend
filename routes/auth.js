@@ -1,9 +1,8 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
 const { body, validationResult } = require('express-validator');
-const { users } = require('../config/store');
+const { User } = require('../config/store');
 
 const router = express.Router();
 
@@ -17,60 +16,37 @@ router.post('/register', [
 
   const { username, password } = req.body;
 
-  if (users.has(username)) {
-    return res.status(409).json({ error: 'Username already taken' });
+  try {
+    const existing = await User.findOne({ username });
+    if (existing) return res.status(409).json({ error: 'Username already taken' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ username, password: hashedPassword, balance: parseFloat(process.env.STARTING_BALANCE) || 1000 });
+    await user.save();
+
+    const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+    res.json({ token, username, balance: user.balance });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
   }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const user = {
-    id: uuidv4(),
-    username,
-    password: hashedPassword,
-    balance: parseFloat(process.env.STARTING_BALANCE || '100'), // Starting crypto balance
-    createdAt: new Date(),
-  };
-
-  users.set(username, user);
-
-  const token = jwt.sign(
-    { id: user.id, username: user.username },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  );
-
-  res.status(201).json({
-    message: 'Account created!',
-    token,
-    user: { id: user.id, username: user.username, balance: user.balance },
-  });
 });
 
 // POST /api/auth/login
-router.post('/login', [
-  body('username').trim().notEmpty(),
-  body('password').notEmpty(),
-], async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+router.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  const user = users.get(username);
 
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ error: 'Invalid username or password' });
+  try {
+    const user = await User.findOne({ username });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(401).json({ error: 'Invalid password' });
+
+    const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+    res.json({ token, username, balance: user.balance });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
   }
-
-  const token = jwt.sign(
-    { id: user.id, username: user.username },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  );
-
-  res.json({
-    message: 'Welcome back!',
-    token,
-    user: { id: user.id, username: user.username, balance: user.balance },
-  });
 });
 
 module.exports = router;
