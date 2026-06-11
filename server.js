@@ -61,7 +61,7 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(🚀 Foretell Backend running on port ${PORT});
-  initGames(io);
+  // initGames(io);
 });
 
 module.exports = { app, io };
