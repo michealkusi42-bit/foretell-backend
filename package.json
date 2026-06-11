@@ -1,7 +1,7 @@
 {
   "name": "foretell-backend",
   "version": "1.0.0",
-  "description": "Crypto casino backend — Foretell",
+  "description": "Crypto casino backend - Foretell",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -17,6 +17,7 @@
     "express-validator": "^7.0.1",
     "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.0",
+    "mongoose": "^8.0.0",
     "socket.io": "^4.6.1",
     "uuid": "^9.0.0"
   },
