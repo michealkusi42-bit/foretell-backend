@@ -1,102 +1,67 @@
-const { User } = require('../config/store');
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
-let crashGame = {
-  status: 'waiting',
-  multiplier: 1.00,
-  crashAt: null,
-  players: new Map(),
-  intervalId: null,
-};
+const authRoutes = require('./routes/auth');
+const walletRoutes = require('./routes/wallet');
+const gameRoutes = require('./routes/games');
+const leaderboardRoutes = require('./routes/leaderboard');
+const affiliateRoutes = require('./routes/affiliates');
+const { router: adminRouter } = require('./routes/admin');
+const { authenticateToken } = require('./middleware/auth');
+const { registerGameHandlers, initGames } = require('./games/socketHandler');
 
-function startCrashGame(io) {
-  const r = Math.random();
-  crashGame.crashAt = r < 0.01 ? 1.00 : parseFloat(Math.max(1, (0.99 / r)).toFixed(2));
-  crashGame.multiplier = 1.00;
-  crashGame.status = 'running';
-  crashGame.players = new Map();
+const app = express();
+const server = http.createServer(app);
 
-  io.emit('crash:start', { status: 'running' });
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
+});
 
-  crashGame.intervalId = setInterval(async () => {
-    crashGame.multiplier = parseFloat((crashGame.multiplier * 1.02).toFixed(2));
+app.set('trust proxy', 1);
+app.use(helmet());
+app.use(cors({ origin: '*' }));
+app.use(express.json());
+app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
-    for (const [sid, player] of crashGame.players.entries()) {
-      if (!player.cashedOut && player.autoCashout && crashGame.multiplier >= player.autoCashout) {
-        const payout = parseFloat((player.bet * player.autoCashout).toFixed(8));
-        try {
-          const user = await User.findOne({ username: player.username });
-          if (user) {
-            user.balance = parseFloat((user.balance + payout).toFixed(8));
-            await user.save();
-            io.to(sid).emit('crash:cashedout', { multiplier: player.autoCashout, payout, balance: user.balance });
-          }
-        } catch (e) {}
-        player.cashedOut = true;
-        player.cashoutAt = player.autoCashout;
-      }
-    }
+app.use('/api/games', (req, res, next) => {
+  const { gameOverrides } = require('./routes/admin');
+  if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
+  next();
+});
 
-    io.emit('crash:tick', { multiplier: crashGame.multiplier });
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+app.use('/api/auth', authRoutes);
+app.use('/api/wallet', authenticateToken, walletRoutes);
+app.use('/api/games', authenticateToken, gameRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/affiliates', affiliateRoutes);
+app.use('/api/admin', adminRouter);
 
-    if (crashGame.multiplier >= crashGame.crashAt) {
-      clearInterval(crashGame.intervalId);
-      crashGame.status = 'crashed';
-      io.emit('crash:crashed', { crashAt: crashGame.crashAt });
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error('Authentication required'));
+  try {
+    const jwt = require('jsonwebtoken');
+    socket.user = jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch { next(new Error('Invalid token')); }
+});
 
-      setTimeout(() => {
-        crashGame.status = 'waiting';
-        io.emit('crash:waiting', { nextIn: 5000 });
-        setTimeout(() => startCrashGame(io), 5000);
-      }, 3000);
-    }
-  }, 100);
-}
+io.on('connection', (socket) => {
+  console.log('Player connected: ' + socket.user.username);
+  registerGameHandlers(io, socket);
+  socket.on('disconnect', () => console.log('Player disconnected: ' + socket.user.username));
+});
 
-function registerGameHandlers(io, socket) {
-  socket.on('crash:bet', async ({ bet, autoCashout }) => {
-    if (crashGame.status !== 'waiting') return socket.emit('error', { message: 'Round already in progress' });
-    try {
-      const user = await User.findOne({ username: socket.user.username });
-      if (!user || user.balance < bet) return socket.emit('error', { message: 'Insufficient balance' });
-      user.balance = parseFloat((user.balance - bet).toFixed(8));
-      await user.save();
-      crashGame.players.set(socket.id, { username: socket.user.username, bet: parseFloat(bet), autoCashout: autoCashout || null, cashedOut: false, cashoutAt: null });
-      socket.emit('crash:betPlaced', { bet, balance: user.balance });
-    } catch (e) { socket.emit('error', { message: 'Server error' }); }
-  });
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log('Foretell Backend running on port ' + PORT);
+  initGames(io);
+});
 
-  socket.on('crash:cashout', async () => {
-    const player = crashGame.players.get(socket.id);
-    if (!player || player.cashedOut || crashGame.status !== 'running') return;
-    const payout = parseFloat((player.bet * crashGame.multiplier).toFixed(8));
-    try {
-      const user = await User.findOne({ username: socket.user.username });
-      if (user) {
-        user.balance = parseFloat((user.balance + payout).toFixed(8));
-        await user.save();
-        socket.emit('crash:cashedout', { multiplier: crashGame.multiplier, payout, balance: user.balance });
-        io.emit('crash:playerCashedOut', { username: socket.user.username, multiplier: crashGame.multiplier });
-      }
-    } catch (e) {}
-    player.cashedOut = true;
-    player.cashoutAt = crashGame.multiplier;
-  });
-
-  socket.on('chat:message', ({ message }) => {
-    if (!message || message.length > 200) return;
-    io.emit('chat:message', { username: socket.user.username, message: message.trim(), timestamp: new Date() });
-  });
-
-  socket.on('wallet:getBalance', async () => {
-    try {
-      const user = await User.findOne({ username: socket.user.username });
-      socket.emit('wallet:balance', { balance: user?.balance ?? 0 });
-    } catch (e) { socket.emit('wallet:balance', { balance: 0 }); }
-  });
-}
-
-function initGames(io) {
-  setTimeout(() => startCrashGame(io), 3000);
-}
-
-module.exports = { registerGameHandlers, initGames };
+module.exports = { app, io };
