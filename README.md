@@ -1,111 +1,126 @@
 # 🎰 Casino Backend
 
 Full backend for your casino platform with:
+
 - ✅ User auth (register/login)
 - ✅ Wallet & balance system
 - ✅ All game endpoints (dice, crash, roulette, lucky spin)
 - ✅ Payments (deposit/withdraw)
 - ✅ Affiliates & bonuses
 - ✅ Real-time WebSocket updates
-- ✅ **Admin panel to control all game outcomes**
+- ✅ Admin panel to control all game outcomes
 
 ---
 
-## 🚀 Deploy to Render.com (Free)
+## 🚀 Setup
 
-### Step 1 — Push to GitHub
-1. Go to github.com and create a **new repository** called `casino-backend`
-2. Upload all these files to it
-
-### Step 2 — Deploy on Render
-1. Go to **render.com** and sign up (free)
-2. Click **New → Web Service**
-3. Connect your GitHub and select `casino-backend`
-4. Set these:
-   - **Build Command:** `npm install`
-   - **Start Command:** `node server.js`
-   - **Environment:** Node
-5. Add Environment Variables:
-   - `JWT_SECRET` → any long random string
-   - `ADMIN_SETUP_SECRET` → your secret password for admin setup
-6. Click **Deploy** — you'll get a URL like `https://casino-backend-xxxx.onrender.com`
-
-### Step 3 — Update Vercel
-Go to your Vercel project → Settings → Environment Variables and update:
-- `VITE_API_BASE_URL` → `https://your-render-url.onrender.com`
-- `VITE_HOST_API` → `https://your-render-url.onrender.com`
-- `VITE_SOCKET_URL` → `https://your-render-url.onrender.com`
-
-### Step 4 — Create Your Admin Account
-After deploying, open your browser and go to:
-```
-POST https://your-render-url.onrender.com/api/admin/setup
-```
-With body:
-```json
-{
-  "secret": "your-ADMIN_SETUP_SECRET",
-  "username": "admin",
-  "email": "your@email.com",
-  "password": "your-admin-password"
-}
-```
-You can use a free tool like **Hoppscotch.io** to send this request.
-
----
-
-## 🎮 Admin Controls (Control Game Outcomes)
-
-### Force ALL games to WIN:
-```
-PUT /api/admin/controls
-{ "game": "global", "control": "globalForce", "value": "win" }
-```
-
-### Force ALL games to LOSE:
-```
-PUT /api/admin/controls
-{ "game": "global", "control": "globalForce", "value": "lose" }
-```
-
-### Set Crash game to crash at specific multiplier:
-```
-PUT /api/admin/controls
-{ "game": "crash", "control": "forceMultiplier", "value": 1.5 }
-```
-
-### Set Dice to always win/lose:
-```
-PUT /api/admin/controls
-{ "game": "dice", "control": "forceResult", "value": "win" }
-```
-
-### Reset to random (normal mode):
-```
-PUT /api/admin/controls
-{ "game": "global", "control": "globalForce", "value": null }
+```bash
+npm install
+cp .env.example .env
+# Edit .env with your secrets
+npm run dev
 ```
 
 ---
 
-## 📋 All API Endpoints
+## 📡 API Reference
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /api/auth/register | Register user |
-| POST | /api/auth/login | Login |
-| GET | /api/player/profile | Get profile |
-| GET | /api/player/balance | Get balance |
-| POST | /api/payment/deposit | Deposit |
-| POST | /api/payment/withdraw | Withdraw |
-| POST | /api/casino/bet | Place bet |
-| GET | /api/casino/history | Bet history |
-| POST | /api/luckyspin/spin | Lucky spin |
-| GET | /api/bonus/available | List bonuses |
-| POST | /api/bonus/claim/:id | Claim bonus |
-| GET | /api/affiliate/stats | Affiliate stats |
-| GET | /api/admin/stats | Admin dashboard stats |
-| GET | /api/admin/users | All users |
-| PUT | /api/admin/controls | **Control outcomes** |
-| PUT | /api/admin/users/:id/balance | Edit user balance |
-| POST | /api/admin/notify | Send notification |
+### Auth
+| Method | Endpoint | Body |
+|--------|----------|------|
+| POST | `/api/auth/register` | `{ username, password }` |
+| POST | `/api/auth/login` | `{ username, password }` |
+
+All protected routes require: `Authorization: Bearer <token>`
+
+---
+
+### Wallet
+| Method | Endpoint | Body |
+|--------|----------|------|
+| GET | `/api/wallet/balance` | — |
+| POST | `/api/wallet/deposit` | `{ amount }` |
+| POST | `/api/wallet/withdraw` | `{ amount }` |
+| GET | `/api/wallet/transactions` | — |
+
+---
+
+### Games
+| Method | Endpoint | Body |
+|--------|----------|------|
+| POST | `/api/games/dice` | `{ bet, target (2-98), over (bool) }` |
+| POST | `/api/games/crash/start` | `{ bet, autoCashout }` |
+| POST | `/api/games/roulette` | `{ bet, betType: 'red'/'black'/'green'/0-36 }` |
+| POST | `/api/games/luckyspin` | `{ bet }` |
+| GET | `/api/games/history` | — |
+
+---
+
+### Affiliates & Bonuses
+| Method | Endpoint | Body |
+|--------|----------|------|
+| POST | `/api/affiliates/create` | — |
+| GET | `/api/affiliates/mine` | — |
+| POST | `/api/affiliates/use` | `{ code }` |
+| POST | `/api/affiliates/bonus/claim` | `{ type: 'welcome'/'daily' }` |
+
+---
+
+### Leaderboard
+| Method | Endpoint |
+|--------|----------|
+| GET | `/api/leaderboard` |
+
+---
+
+### Admin (requires `x-admin-key` header)
+| Method | Endpoint | Body |
+|--------|----------|------|
+| GET | `/api/admin/stats` | — |
+| GET | `/api/admin/users` | — |
+| POST | `/api/admin/users/:username/adjust-balance` | `{ amount, reason }` |
+| POST | `/api/admin/users/:username/ban` | — |
+| GET | `/api/admin/overrides` | — |
+| POST | `/api/admin/overrides` | `{ game, value }` |
+| POST | `/api/admin/maintenance` | `{ enabled: true/false }` |
+
+---
+
+## ⚡ WebSocket Events (Socket.io)
+
+Connect with: `{ auth: { token: '<jwt>' } }`
+
+### Crash Game
+| Emit | Listen | Description |
+|------|--------|-------------|
+| `crash:bet` `{ bet, autoCashout }` | `crash:betPlaced` | Place a bet |
+| `crash:cashout` | `crash:cashedout` | Cash out manually |
+| — | `crash:tick` `{ multiplier }` | Live multiplier updates |
+| — | `crash:crashed` `{ crashAt }` | Round ended |
+
+### Chat
+| Emit | Listen |
+|------|--------|
+| `chat:message` `{ message }` | `chat:message` |
+
+---
+
+## 🗂️ Project Structure
+
+```
+foretell-backend/
+├── server.js            # Entry point
+├── routes/
+│   ├── auth.js          # Register/Login
+│   ├── wallet.js        # Balance/Deposit/Withdraw
+│   ├── games.js         # Dice/Crash/Roulette/LuckySpin
+│   ├── leaderboard.js   # Top players
+│   ├── affiliates.js    # Referral codes & bonuses
+│   └── admin.js         # Admin controls
+├── middleware/
+│   └── auth.js          # JWT verification
+├── games/
+│   └── socketHandler.js # Real-time crash game + chat
+└── config/
+    └── store.js         # In-memory data store
+```
