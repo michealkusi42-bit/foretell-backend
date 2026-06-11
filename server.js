@@ -53,7 +53,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  console.log(🎰 Player connected: ${socket.user.username});
+  console.log(Player connected: ${socket.user.username});
   registerGameHandlers(io, socket);
   socket.on('disconnect', () => console.log(👋 Player disconnected: ${socket.user.username}));
 });
