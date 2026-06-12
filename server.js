@@ -46,11 +46,11 @@ app.use('/api/admin', adminRouter);
 app.get('/api/setting/site', (req, res) => res.json({}));
 app.get('/api/casino/recommend', (req, res) => res.json([]));
 app.post('/api/casino/recommend', (req, res) => res.json([]));
-app.post('/api/casino/ag-games', (req, res) => res.json({ data: [], total: 0 }));
+app.post('/api/casino/ag-games', (req, res) => res.json([]));
 app.get('/api/casino/ag-category', (req, res) => res.json([]));
-app.post('/api/casino/games', (req, res) => res.json({ data: [], total: 0 }));
+app.post('/api/casino/games', (req, res) => res.json([]));
 app.post('/api/casino/provider', (req, res) => res.json([]));
-app.post('/api/casino/search', (req, res) => res.json({ data: [], total: 0 }));
+app.post('/api/casino/search', (req, res) => res.json([]));
 app.get('/api/casino/providers', (req, res) => res.json([]));
 app.post('/api/casino/launch', authenticateToken, (req, res) => res.json({ url: '' }));
 app.post('/api/casino/ag-launch', authenticateToken, (req, res) => res.json({ url: '' }));
@@ -81,7 +81,6 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log('Foretell Backend running on port ' + PORT);
-  // initGames(io);
 });
 
 module.exports = { app, io };
