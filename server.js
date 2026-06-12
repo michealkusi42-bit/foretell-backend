@@ -55,7 +55,7 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.user.username}`);
   registerGameHandlers(io, socket);
-  console.log('👋 Player disconnected: ${socket.user.username}'));
+  console.log('👋 Player disconnected: ${socket.user.username}');
         });
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
