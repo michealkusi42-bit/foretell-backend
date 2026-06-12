@@ -42,6 +42,26 @@ app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/affiliates', affiliateRoutes);
 app.use('/api/admin', adminRouter);
 
+// Stub routes for frontend compatibility
+app.get('/api/setting/site', (req, res) => res.json({}));
+app.get('/api/casino/recommend', (req, res) => res.json([]));
+app.post('/api/casino/recommend', (req, res) => res.json([]));
+app.post('/api/casino/ag-games', (req, res) => res.json({ data: [], total: 0 }));
+app.get('/api/casino/ag-category', (req, res) => res.json([]));
+app.post('/api/casino/games', (req, res) => res.json({ data: [], total: 0 }));
+app.post('/api/casino/provider', (req, res) => res.json([]));
+app.post('/api/casino/search', (req, res) => res.json({ data: [], total: 0 }));
+app.get('/api/casino/providers', (req, res) => res.json([]));
+app.post('/api/casino/launch', authenticateToken, (req, res) => res.json({ url: '' }));
+app.post('/api/casino/ag-launch', authenticateToken, (req, res) => res.json({ url: '' }));
+app.get('/api/preference', authenticateToken, (req, res) => res.json({ language: 'en' }));
+app.patch('/api/preference', authenticateToken, (req, res) => res.json({ language: 'en' }));
+app.get('/api/notification', authenticateToken, (req, res) => res.json([]));
+app.get('/api/player/balance', authenticateToken, (req, res) => res.json({ balance: 0 }));
+app.get('/api/sport', (req, res) => res.json([]));
+app.get('/api/bonus', (req, res) => res.json([]));
+app.get('/api/package', (req, res) => res.json([]));
+
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error('Authentication required'));
