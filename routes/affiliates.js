@@ -18,7 +18,7 @@ router.post('/create', authenticateToken, async (req, res) => {
   const existing = [...affiliates.values()].find(a => a.ownerUsername === req.user.username);
   if (existing) return res.json({ code: existing.code, earnings: existing.earnings, referrals: existing.referrals.length });
 
-  const code = ${req.user.username.toUpperCase().slice(0, 5)}-${uuidv4().slice(0, 6).toUpperCase()};
+  const code = req.user.username.toUpperCase().slice(0, 5) + '-' + uuidv4().slice(0, 6).toUpperCase();
   affiliates.set(code, { ownerUsername: req.user.username, code, earnings: 0, referrals: [] });
   res.status(201).json({ code, earnings: 0, referrals: 0 });
 });
@@ -39,4 +39,41 @@ router.post('/use', authenticateToken, async (req, res) => {
   if (aff.ownerUsername === req.user.username) return res.status(400).json({ error: 'Cannot use your own code' });
 
   try {
-    const refer
+    const referrer = await User.findOne({ username: aff.ownerUsername });
+    if (referrer) {
+      referrer.balance = (referrer.balance || 0) + 5;
+      await referrer.save();
+    }
+    aff.earnings += 5;
+    aff.referrals.push(req.user.username);
+    usedCodes.set(req.user.username, code);
+    res.json({ message: 'Referral code applied successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to apply referral code' });
+  }
+});
+
+router.get('/bonuses', authenticateToken, (req, res) => {
+  res.json(BONUSES);
+});
+
+router.post('/claim', authenticateToken, async (req, res) => {
+  const { type } = req.body;
+  if (!BONUSES[type]) return res.status(400).json({ error: 'Invalid bonus type' });
+
+  const key = req.user.username + ':' + type;
+  if (claimedBonuses.has(key)) return res.status(409).json({ error: 'Bonus already claimed' });
+
+  try {
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.balance = (user.balance || 0) + BONUSES[type].amount;
+    await user.save();
+    claimedBonuses.set(key, true);
+    res.json({ message: 'Bonus claimed', amount: BONUSES[type].amount });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to claim bonus' });
+  }
+});
+
+module.exports = router;
