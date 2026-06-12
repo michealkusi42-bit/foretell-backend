@@ -46,43 +46,4 @@ router.get('/users', async (req, res) => {
   }
 });
 
-router.post('/users/:username/adjust-balance', async (req, res) => {
-  try {
-    const user = await User.findOne({ username: req.params.username });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    const { amount, reason } = req.body;
-    user.balance = parseFloat((user.balance + parseFloat(amount)).toFixed(8));
-    await user.save();
-    res.json({ message: Balance adjusted by ${amount}, username: user.username, newBalance: user.balance, reason });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-router.post('/users/:username/ban', async (req, res) => {
-  try {
-    const user = await User.findOne({ username: req.params.username });
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    user.banned = true;
-    await user.save();
-    res.json({ message: ${req.params.username} has been banned });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-router.get('/overrides', (req, res) => res.json(gameOverrides));
-
-router.post('/overrides', (req, res) => {
-  const { game, value } = req.body;
-  if (!(game in gameOverrides)) return res.status(400).json({ error: Unknown game. });
-  gameOverrides[game] = value ?? null;
-  res.json({ message: 'Override set', game, value: gameOverrides[game], overrides: gameOverrides });
-});
-
-router.post('/maintenance', (req, res) => {
-  gameOverrides.maintenanceMode = !!req.body.enabled;
-  res.json({ maintenanceMode: gameOverrides.maintenanceMode });
-});
-
-module.exports = { router, gameOverrides };
+router.post('/users/:username/adjust-balance'
