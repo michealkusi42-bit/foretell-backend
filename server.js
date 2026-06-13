@@ -13,10 +13,28 @@ const leaderboardRoutes = require('./routes/leaderboard');
 const affiliateRoutes = require('./routes/affiliates');
 const { router: adminRouter } = require('./routes/admin');
 const { authenticateToken } = require('./middleware/auth');
-const { registerGameHandlers, initGames } = require('./games/socketHandler');
+const { registerGameHandlers } = require('./games/socketHandler');
 
 const app = express();
 const server = http.createServer(app);
+
+const allowedOrigins = [
+  'https://foretelbet.netlify.app',
+  'https://foretell-bet.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5173'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true);
+    }
+  },
+  credentials: true
+};
 
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
@@ -24,7 +42,7 @@ const io = new Server(server, {
 
 app.set('trust proxy', 1);
 app.use(helmet());
-app.use(cors({ origin: '*' }));
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
@@ -42,16 +60,16 @@ app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/affiliates', affiliateRoutes);
 app.use('/api/admin', adminRouter);
 
-// Stub routes for frontend compatibility
 app.get('/api/setting/site', (req, res) => res.json({}));
 app.get('/api/casino/recommend', (req, res) => res.json([]));
 app.post('/api/casino/recommend', (req, res) => res.json([]));
-app.post('/api/casino/ag-games', (req, res) => res.json([]));
+app.post('/api/casino/ag-games', (req, res) => res.json({ data: [], count: 0 }));
 app.get('/api/casino/ag-category', (req, res) => res.json([]));
 app.post('/api/casino/games', (req, res) => res.json([]));
 app.post('/api/casino/provider', (req, res) => res.json([]));
 app.post('/api/casino/search', (req, res) => res.json([]));
 app.get('/api/casino/providers', (req, res) => res.json([]));
+app.get('/api/casino/recent-big-win', (req, res) => res.json([]));
 app.post('/api/casino/launch', authenticateToken, (req, res) => res.json({ url: '' }));
 app.post('/api/casino/ag-launch', authenticateToken, (req, res) => res.json({ url: '' }));
 app.get('/api/preference', authenticateToken, (req, res) => res.json({ language: 'en' }));
