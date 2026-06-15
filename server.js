@@ -77,14 +77,34 @@ app.get('/api/sport', (req, res) => res.json([]));
 app.get('/api/bonus', (req, res) => res.json([]));
 app.get('/api/package', (req, res) => res.json([]));
 
+app.get('/api/player/my-games', authenticateToken, (req, res) => res.json([]));
+app.post('/api/player/transaction', authenticateToken, (req, res) => res.json({ promotions: [], transactions: [], system: [], count: 0, promotionsCount: 0, transactionsCount: 0, systemCount: 0 }));
+app.get('/api/player/kyc', authenticateToken, (req, res) => res.json({ status: 'unverified' }));
+app.post('/api/player/kyc', authenticateToken, (req, res) => res.json({ status: 'pending' }));
+app.get('/api/currency/list', (req, res) => res.json([{ code: 'USD', name: 'US Dollar', symbol: '$' }]));
+app.post('/api/nowpay/deposit', authenticateToken, (req, res) => res.json({ status: 'pending', address: '' }));
+app.post('/api/withdraw', authenticateToken, (req, res) => res.json({ status: 'pending' }));
+app.get('/api/player/username', authenticateToken, (req, res) => res.json({}));
+app.patch('/api/player/username', authenticateToken, (req, res) => res.json({}));
+app.patch('/api/player/password', authenticateToken, (req, res) => res.json({}));
+app.patch('/api/player/avatar', authenticateToken, (req, res) => res.json({}));
+app.patch('/api/player/currency', authenticateToken, (req, res) => res.json({}));
+app.get('/api/player/referral', authenticateToken, (req, res) => res.json({ code: '', count: 0 }));
+app.post('/api/nowpay/get-withdraw-currency', authenticateToken, (req, res) => res.json({}));
+app.get('/api/nowpay/currency', (req, res) => res.json([]));
+app.get('/api/casino/game-detail/:code', (req, res) => res.json({}));
+app.get('/api/casino/ag-game-detail/:code', (req, res) => res.json({}));
+app.post('/api/casino/search', (req, res) => res.json({ data: mockGames, count: mockGames.length }));
+app.get('/api/bonus/:id', (req, res) => res.json({}));
+
 io.use((socket, next) => {
-  const token = socket.handshake.auth?.token;
+  const token = socket.handshake.auth && socket.handshake.auth.token;
   if (!token) return next(new Error('Authentication required'));
   try {
     const jwt = require('jsonwebtoken');
     socket.user = jwt.verify(token, process.env.JWT_SECRET);
     next();
-  } catch { next(new Error('Invalid token')); }
+  } catch (e) { next(new Error('Invalid token')); }
 });
 
 io.on('connection', (socket) => {
