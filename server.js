@@ -12,6 +12,7 @@ const gameRoutes = require('./routes/games');
 const leaderboardRoutes = require('./routes/leaderboard');
 const affiliateRoutes = require('./routes/affiliates');
 const { router: adminRouter } = require('./routes/admin');
+const offlineGameRoutes = require('./routes/offline-game');
 const { authenticateToken } = require('./middleware/auth');
 const { registerGameHandlers } = require('./games/socketHandler');
 
@@ -29,6 +30,12 @@ app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
 app.use('/api/games', (req, res, next) => {
+  const { gameOverrides } = require('./routes/admin');
+  if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
+  next();
+});
+
+app.use('/api/offline-game', (req, res, next) => {
   const { gameOverrides } = require('./routes/admin');
   if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
   next();
@@ -56,6 +63,7 @@ app.use('/api/games', authenticateToken, gameRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/affiliates', affiliateRoutes);
 app.use('/api/admin', adminRouter);
+app.use('/api/offline-game', offlineGameRoutes);
 
 app.get('/api/setting/site', (req, res) => res.json({}));
 app.get('/api/casino/recommend', (req, res) => res.json(mockGames));
