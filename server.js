@@ -19,13 +19,39 @@ const { registerGameHandlers } = require('./games/socketHandler');
 const app = express();
 const server = http.createServer(app);
 
+// ✅ CORS origins
+const allowedOrigins = [
+  'https://foretell-bet.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
 });
 
 app.set('trust proxy', 1);
 app.use(helmet());
-app.use(cors({ origin: '*', credentials: true }));
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // ✅ Handle preflight requests
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
@@ -102,7 +128,6 @@ app.post('/api/nowpay/get-withdraw-currency', authenticateToken, (req, res) => r
 app.get('/api/nowpay/currency', (req, res) => res.json([]));
 app.get('/api/casino/game-detail/:code', (req, res) => res.json({}));
 app.get('/api/casino/ag-game-detail/:code', (req, res) => res.json({}));
-app.post('/api/casino/search', (req, res) => res.json({ data: mockGames, count: mockGames.length }));
 app.get('/api/bonus/:id', (req, res) => res.json({}));
 
 io.use((socket, next) => {
