@@ -359,6 +359,106 @@ router.post('/bingo/play', async (req, res) => {
   }
 });
 
+// ─── POKER (Video Poker - Jacks or Better) ───────────────────────────────────
+const SUITS = ['♠', '♥', '♦', '♣'];
+const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+const RANK_VALUES = { '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14 };
+
+function createDeck() {
+  const deck = [];
+  for (const suit of SUITS) for (const rank of RANKS) deck.push({ rank, suit });
+  return deck;
+}
+
+function shuffle(deck) {
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+function evaluateHand(cards) {
+  const ranks = cards.map(c => RANK_VALUES[c.rank]).sort((a, b) => a - b);
+  const suits = cards.map(c => c.suit);
+  const rankCounts = {};
+  for (const r of ranks) rankCounts[r] = (rankCounts[r] || 0) + 1;
+  const counts = Object.values(rankCounts).sort((a, b) => b - a);
+  const isFlush = suits.every(s => s === suits[0]);
+  const isStraight = ranks[4] - ranks[0] === 4 && counts[0] === 1;
+  const isRoyalStraight = isStraight && ranks[0] === 10;
+
+  if (isFlush && isRoyalStraight) return { name: 'Royal Flush', multiplier: 800 };
+  if (isFlush && isStraight) return { name: 'Straight Flush', multiplier: 50 };
+  if (counts[0] === 4) return { name: 'Four of a Kind', multiplier: 25 };
+  if (counts[0] === 3 && counts[1] === 2) return { name: 'Full House', multiplier: 9 };
+  if (isFlush) return { name: 'Flush', multiplier: 6 };
+  if (isStraight) return { name: 'Straight', multiplier: 4 };
+  if (counts[0] === 3) return { name: 'Three of a Kind', multiplier: 3 };
+  if (counts[0] === 2 && counts[1] === 2) return { name: 'Two Pair', multiplier: 2 };
+  if (counts[0] === 2) {
+    const pairRank = parseInt(Object.keys(rankCounts).find(r => rankCounts[r] === 2));
+    if (pairRank >= 11) return { name: 'Jacks or Better', multiplier: 1 };
+  }
+  return { name: 'No Win', multiplier: 0 };
+}
+
+const activePokerGames = {};
+
+router.post('/poker/deal', async (req, res) => {
+  try {
+    const { betAmount } = req.body;
+    if (!betAmount || betAmount <= 0) return res.status(400).json({ error: 'Invalid bet' });
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    await deductBet(user, parseFloat(betAmount));
+    await user.save();
+    const deck = shuffle(createDeck());
+    const hand = deck.splice(0, 5);
+    const remaining = deck;
+    activePokerGames[req.user.username] = { betAmount: parseFloat(betAmount), hand, deck: remaining };
+    res.json({ success: true, data: { hand, newBalance: user.balance } });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+router.post('/poker/draw', async (req, res) => {
+  try {
+    const { holdIndexes } = req.body;
+    const game = activePokerGames[req.user.username];
+    if (!game) return res.status(400).json({ success: false, message: 'No active poker game' });
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const newHand = game.hand.map((card, i) => {
+      if (holdIndexes.includes(i)) return card;
+      return game.deck.shift();
+    });
+    const result = evaluateHand(newHand);
+    const payout = parseFloat((game.betAmount * result.multiplier).toFixed(8));
+    if (payout > 0) applyWin(user, payout);
+    await user.save();
+    await recordTx(req.user.username, 'poker', game.betAmount, payout, user.balance, {
+      finalHand: newHand,
+      handName: result.name,
+      multiplier: result.multiplier
+    });
+    delete activePokerGames[req.user.username];
+    res.json({
+      success: true,
+      data: { hand: newHand, result: result.name, multiplier: result.multiplier, payout, win: payout > 0, newBalance: user.balance }
+    });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+router.get('/poker/active', async (req, res) => {
+  const game = activePokerGames[req.user.username];
+  if (!game) return res.json({ success: true, data: null });
+  res.json({ success: true, data: { betAmount: game.betAmount, hand: game.hand } });
+});
+
 // HISTORY
 router.get('/history', async (req, res) => {
   try {
@@ -381,3 +481,7 @@ router.get('/:gameType/history', async (req, res) => {
 });
 
 module.exports = router;
+@michealkusi42-bit
+Comment
+
+Leave a comment
