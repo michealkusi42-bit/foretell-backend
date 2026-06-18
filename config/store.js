@@ -5,7 +5,12 @@ const userSchema = new mongoose.Schema({
   email: { type: String, unique: true, sparse: true },
   password: String,
   balance: { type: Number, default: 0 },
-  currency: { type: String, default: 'CRYPT' }
+  currency: { type: String, default: 'CRYPT' },
+  // ✅ Referral system fields
+  referralCode: { type: String, unique: true, sparse: true },
+  referredBy: { type: String, default: null },
+  referralCount: { type: Number, default: 0 },
+  referralEarnings: { type: Number, default: 0 }
 });
 
 const transactionSchema = new mongoose.Schema({
