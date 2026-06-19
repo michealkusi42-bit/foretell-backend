@@ -11,6 +11,7 @@ const walletRoutes = require('./routes/wallet');
 const gameRoutes = require('./routes/games');
 const leaderboardRoutes = require('./routes/leaderboard');
 const affiliateRoutes = require('./routes/affiliates');
+const vipSpinRoutes = require('./routes/vip-spin'); // ✅ NEW
 const { router: adminRouter } = require('./routes/admin');
 const offlineGameRoutes = require('./routes/offline-game');
 const { authenticateToken } = require('./middleware/auth');
@@ -88,6 +89,7 @@ app.use('/api/wallet', authenticateToken, walletRoutes);
 app.use('/api/games', authenticateToken, gameRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/affiliates', affiliateRoutes);
+app.use('/api/vip-spin', vipSpinRoutes); // ✅ NEW — auth is applied per-route inside the file
 app.use('/api/admin', adminRouter);
 app.use('/api/offline-game', offlineGameRoutes);
 
