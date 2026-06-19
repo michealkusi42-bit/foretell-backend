@@ -9,7 +9,12 @@ const userSchema = new mongoose.Schema({
   referralCode: { type: String, unique: true, sparse: true },
   referredBy: { type: String, default: null },
   referralCount: { type: Number, default: 0 },
-  referralEarnings: { type: Number, default: 0 }
+  referralEarnings: { type: Number, default: 0 },
+  // ✅ NEW: VIP spin fields
+  qualifiedReferralCount: { type: Number, default: 0 }, // referred friends who placed a bet >= GHS50
+  hasPlacedQualifyingBet: { type: Boolean, default: false }, // prevents double-counting this user as a qualifier
+  vipSpinsUsed: { type: Number, default: 0 },
+  freeSpinsBalance: { type: Number, default: 0 }
 });
 
 const transactionSchema = new mongoose.Schema({
@@ -46,11 +51,22 @@ const transactionSchema = new mongoose.Schema({
   handName: String,
 });
 
+// ✅ NEW: log of VIP spin wins, also powers GET /api/vip-spin/winners
+const vipSpinWinSchema = new mongoose.Schema({
+  id: String,
+  username: String,
+  prizeType: { type: String, enum: ['credit', 'free_spins', 'merch'] },
+  prizeLabel: String,
+  prizeValue: Number,
+  timestamp: Date
+});
+
 const User = mongoose.model('User', userSchema);
 const Transaction = mongoose.model('Transaction', transactionSchema);
+const VipSpinWin = mongoose.model('VipSpinWin', vipSpinWinSchema);
 
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB error:', err));
 
-module.exports = { User, Transaction };
+module.exports = { User, Transaction, VipSpinWin };
