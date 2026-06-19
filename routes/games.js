@@ -1,6 +1,7 @@
 const express = require('express');
 const { User, Transaction } = require('../config/store');
 const { v4: uuidv4 } = require('uuid');
+const { checkAndQualifyReferral } = require('../utils/referralQualification');
 
 const router = express.Router();
 
@@ -13,9 +14,13 @@ function applyWin(user, payout) {
   user.balance = parseFloat((user.balance + payout).toFixed(8));
 }
 
+// ✅ FIX: username is now actually saved on the transaction (it was being
+// dropped before, which is also why /history was returning nothing).
+// ✅ NEW: after every recorded bet, check if it qualifies a referral.
 async function recordTx(username, type, bet, payout, balanceAfter, meta = {}) {
-  const tx = new Transaction({ id: uuidv4(), type, bet, payout, profit: payout - bet, balanceAfter, timestamp: new Date() });
+  const tx = new Transaction({ id: uuidv4(), username, type, bet, payout, profit: payout - bet, balanceAfter, timestamp: new Date() });
   await tx.save();
+  await checkAndQualifyReferral(username, bet);
   return tx;
 }
 
