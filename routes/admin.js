@@ -1,148 +1,278 @@
 const express = require('express');
 const { User, Transaction } = require('../config/store');
+const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-const gameOverrides = {
-  updown: null,
-  coinflip: null,
-  dice: null,
-  hilo: null,
-  mines: null,
-  roulette: null,
-  bingo: null,
-  racing: null,
-  lottery: null,
-  poker: null,
-  slots: null,
-  crash: null,
-  luckyspin: null,
-  maintenanceMode: false,
-};
+// ─── Per-user game overrides (in memory) ────────────────────────────────────
+// Structure: { username: { game: override } }
+// Override values per game:
+//   coinflip:  'win' | 'lose' | 'heads' | 'tails'
+//   dice:      'win' | 'lose' | number (exact roll)
+//   hilo:      'win' | 'lose' | number (exact next card 1-13)
+//   mines:     'win' | 'lose' | [array of mine positions 0-24]
+//   roulette:  'win' | 'lose' | number (exact result 0-36)
+//   updown:    'win' | 'lose' | 'up' | 'down'
+//   crash:     number (exact crash point e.g. 1.5)
+//   lottery:   'win' | 'lose' | [array of 5 winning numbers]
+//   racing:    'win' | 'lose' | number (winning horse 1-8)
+//   bingo:     'win' | 'lose' | [array of drawn numbers]
+//   poker:     'win' | 'lose'
+const userGameOverrides = {};
 
-// Active game rounds
-const activeRounds = {};
+// Legacy global overrides (kept for backwards compat, per-user takes priority)
+const gameOverrides = {};
 
-function adminOnly(req, res, next) {
-  const adminKey = req.headers['x-admin-key'];
-  if (!adminKey || adminKey !== process.env.ADMIN_SECRET) {
-    return res.status(403).json({ error: 'Admin access denied' });
+// Get override for a specific user and game
+function getUserOverride(username, game) {
+  if (userGameOverrides[username] && userGameOverrides[username][game] !== undefined) {
+    return userGameOverrides[username][game];
   }
-  next();
+  return gameOverrides[game] !== undefined ? gameOverrides[game] : null;
 }
 
+// Clear override after it's been used (one-shot)
+function clearUserOverride(username, game) {
+  if (userGameOverrides[username]) {
+    delete userGameOverrides[username][game];
+  }
+}
+
+// ─── Admin middleware ────────────────────────────────────────────────────────
+async function adminOnly(req, res, next) {
+  try {
+    const user = await User.findOne({ username: req.user.username });
+    if (!user || !user.isAdmin) return res.status(403).json({ error: 'Admin only' });
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+}
+
+router.use(authenticateToken);
 router.use(adminOnly);
 
+// ─── DASHBOARD STATS ─────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
-    const transactions = await Transaction.find({});
-    const allGames = Object.keys(gameOverrides).filter(k => k !== 'maintenanceMode');
-    const gameTx = transactions.filter(t => allGames.includes(t.type));
-    const totalGames = gameTx.length;
-    const totalWagered = gameTx.reduce((s, t) => s + (t.bet || 0), 0);
-    const totalPayout = gameTx.reduce((s, t) => s + (t.payout || 0), 0);
-    const houseEdge = totalWagered > 0
-      ? (((totalWagered - totalPayout) / totalWagered) * 100).toFixed(2)
-      : '0.00';
+    const totalDeposits = await Transaction.aggregate([
+      { $match: { type: 'deposit', status: 'approved' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalWithdrawals = await Transaction.aggregate([
+      { $match: { type: 'withdraw', status: 'approved' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalBets = await Transaction.aggregate([
+      { $match: { type: { $in: ['coinflip','dice','hilo','mines','roulette','updown','crash','lottery','racing','bingo','poker'] } } },
+      { $group: { _id: null, total: { $sum: '$bet' }, payout: { $sum: '$payout' } } }
+    ]);
+    const pendingDeposits = await Transaction.countDocuments({ type: 'deposit', status: 'pending' });
+    const pendingWithdrawals = await Transaction.countDocuments({ type: 'withdraw', status: 'pending' });
+
     res.json({
-      totalUsers,
-      totalGames,
-      totalWagered,
-      totalPayout,
-      houseProfit: totalWagered - totalPayout,
-      houseEdgePercent: houseEdge,
-      maintenanceMode: gameOverrides.maintenanceMode,
-      activeRounds
+      success: true,
+      data: {
+        totalUsers,
+        pendingDeposits,
+        pendingWithdrawals,
+        totalDeposited: totalDeposits[0]?.total || 0,
+        totalWithdrawn: totalWithdrawals[0]?.total || 0,
+        totalBets: totalBets[0]?.total || 0,
+        totalPayouts: totalBets[0]?.payout || 0,
+        houseProfit: (totalBets[0]?.total || 0) - (totalBets[0]?.payout || 0)
+      }
     });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
+// ─── DEPOSITS ────────────────────────────────────────────────────────────────
+router.get('/deposits', async (req, res) => {
+  try {
+    const { status = 'pending' } = req.query;
+    const query = { type: 'deposit' };
+    if (status !== 'all') query.status = status;
+    const deposits = await Transaction.find(query).sort({ timestamp: -1 }).limit(100);
+    res.json({ success: true, data: deposits });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/deposits/:id/approve', async (req, res) => {
+  try {
+    const tx = await Transaction.findOne({ id: req.params.id, type: 'deposit' });
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+    if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+
+    const user = await User.findOne({ username: tx.username });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Credit balance on approval
+    user.balance = parseFloat((user.balance + tx.amount).toFixed(2));
+    await user.save();
+
+    tx.status = 'approved';
+    tx.processedAt = new Date();
+    await tx.save();
+
+    res.json({ success: true, message: `Deposit of GHS ${tx.amount} approved for ${tx.username}`, newBalance: user.balance });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/deposits/:id/reject', async (req, res) => {
+  try {
+    const tx = await Transaction.findOne({ id: req.params.id, type: 'deposit' });
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+    if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+
+    tx.status = 'rejected';
+    tx.processedAt = new Date();
+    await tx.save();
+
+    res.json({ success: true, message: `Deposit rejected for ${tx.username}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── WITHDRAWALS ─────────────────────────────────────────────────────────────
+router.get('/withdrawals', async (req, res) => {
+  try {
+    const { status = 'pending' } = req.query;
+    const query = { type: 'withdraw' };
+    if (status !== 'all') query.status = status;
+    const withdrawals = await Transaction.find(query).sort({ timestamp: -1 }).limit(100);
+    res.json({ success: true, data: withdrawals });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/withdrawals/:id/approve', async (req, res) => {
+  try {
+    const tx = await Transaction.findOne({ id: req.params.id, type: 'withdraw' });
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+    if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+
+    // Balance already deducted on submission — just mark approved
+    tx.status = 'approved';
+    tx.processedAt = new Date();
+    await tx.save();
+
+    res.json({ success: true, message: `Withdrawal of GHS ${tx.amount} approved for ${tx.username}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/withdrawals/:id/reject', async (req, res) => {
+  try {
+    const tx = await Transaction.findOne({ id: req.params.id, type: 'withdraw' });
+    if (!tx) return res.status(404).json({ error: 'Transaction not found' });
+    if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+
+    // Refund balance since it was deducted on submission
+    const user = await User.findOne({ username: tx.username });
+    if (user) {
+      user.balance = parseFloat((user.balance + tx.amount).toFixed(2));
+      await user.save();
+    }
+
+    tx.status = 'rejected';
+    tx.processedAt = new Date();
+    await tx.save();
+
+    res.json({ success: true, message: `Withdrawal rejected and refunded for ${tx.username}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── USERS ───────────────────────────────────────────────────────────────────
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({});
-    res.json({
-      users: users.map(u => ({
-        username: u.username,
-        email: u.email,
-        balance: u.balance,
-        currency: u.currency,
-        createdAt: u.createdAt
-      }))
-    });
+    const users = await User.find({}, { password: 0 }).sort({ balance: -1 });
+    res.json({ success: true, data: users });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Get all overrides
-router.get('/overrides', (req, res) => res.json(gameOverrides));
-
-// Set game override (admin manually sets outcome)
-router.post('/overrides', (req, res) => {
-  const { game, value } = req.body;
-  if (!(game in gameOverrides)) return res.status(400).json({ error: 'Unknown game.' });
-  gameOverrides[game] = value ?? null;
-  res.json({
-    message: 'Override set',
-    game,
-    value: gameOverrides[game],
-    overrides: gameOverrides
-  });
-});
-
-// Start a game round
-router.post('/round/start', (req, res) => {
-  const { game } = req.body;
-  if (!game) return res.status(400).json({ error: 'Game required' });
-  activeRounds[game] = {
-    status: 'betting',
-    startTime: Date.now(),
-    bets: [],
-    outcome: null
-  };
-  res.json({ message: 'Round started', round: activeRounds[game] });
-});
-
-// End a game round with outcome
-router.post('/round/end', (req, res) => {
-  const { game, outcome } = req.body;
-  if (!game || outcome === undefined) {
-    return res.status(400).json({ error: 'Game and outcome required' });
-  }
-  if (!activeRounds[game]) {
-    return res.status(400).json({ error: 'No active round for this game' });
-  }
-  activeRounds[game].status = 'ended';
-  activeRounds[game].outcome = outcome;
-  activeRounds[game].endTime = Date.now();
-  gameOverrides[game] = outcome;
-  res.json({ message: 'Round ended', round: activeRounds[game] });
-});
-
-// Get active rounds
-router.get('/rounds', (req, res) => res.json(activeRounds));
-
-// Maintenance mode
-router.post('/maintenance', (req, res) => {
-  gameOverrides.maintenanceMode = !!req.body.enabled;
-  res.json({ maintenanceMode: gameOverrides.maintenanceMode });
-});
-
-// Adjust user balance
-router.post('/user/balance', async (req, res) => {
+router.post('/users/:username/adjust-balance', async (req, res) => {
   try {
-    const { username, amount } = req.body;
-    const user = await User.findOne({ username });
+    const { amount, action } = req.body; // action: 'add' | 'deduct' | 'set'
+    const user = await User.findOne({ username: req.params.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    user.balance += amount;
+
+    if (action === 'add') user.balance = parseFloat((user.balance + parseFloat(amount)).toFixed(2));
+    else if (action === 'deduct') user.balance = Math.max(0, parseFloat((user.balance - parseFloat(amount)).toFixed(2)));
+    else if (action === 'set') user.balance = parseFloat(parseFloat(amount).toFixed(2));
+
     await user.save();
-    res.json({ message: 'Balance updated', balance: user.balance });
+    res.json({ success: true, newBalance: user.balance });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-module.exports = { router, gameOverrides, activeRounds };
+router.post('/users/:username/suspend', async (req, res) => {
+  try {
+    const user = await User.findOne({ username: req.params.username });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.suspended = !user.suspended;
+    await user.save();
+    res.json({ success: true, suspended: user.suspended });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ─── GAME OVERRIDES (per user) ───────────────────────────────────────────────
+// Set override for a specific user's next game
+router.post('/overrides/:username', async (req, res) => {
+  try {
+    const { game, value } = req.body;
+    // value examples:
+    //   { game: 'coinflip', value: 'win' }
+    //   { game: 'dice', value: 'lose' }
+    //   { game: 'mines', value: [0,1,2] }
+    //   { game: 'lottery', value: [5,12,23,34,45] }
+    //   { game: 'crash', value: 1.5 }
+
+    if (!userGameOverrides[req.params.username]) {
+      userGameOverrides[req.params.username] = {};
+    }
+    userGameOverrides[req.params.username][game] = value;
+
+    res.json({ success: true, message: `Override set: ${req.params.username} → ${game} → ${JSON.stringify(value)}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get current overrides for a user
+router.get('/overrides/:username', async (req, res) => {
+  res.json({ success: true, data: userGameOverrides[req.params.username] || {} });
+});
+
+// Clear all overrides for a user
+router.delete('/overrides/:username', async (req, res) => {
+  delete userGameOverrides[req.params.username];
+  res.json({ success: true, message: 'All overrides cleared' });
+});
+
+// Clear override for a specific game
+router.delete('/overrides/:username/:game', async (req, res) => {
+  if (userGameOverrides[req.params.username]) {
+    delete userGameOverrides[req.params.username][req.params.game];
+  }
+  res.json({ success: true, message: `Override cleared: ${req.params.username} → ${req.params.game}` });
+});
+
+module.exports = { router, gameOverrides, getUserOverride, clearUserOverride };
