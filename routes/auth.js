@@ -9,15 +9,12 @@ const { Resend } = require('resend');
 const router = express.Router();
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// Store OTPs temporarily (in production use Redis)
 const otpStore = new Map();
 
-// Generate OTP
 function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Generate referral code
 function generateReferralCode(username) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = username.toUpperCase().slice(0, 3);
@@ -27,23 +24,21 @@ function generateReferralCode(username) {
   return code;
 }
 
-// ✅ SEND OTP TO EMAIL
+// ✅ SEND OTP
 router.post('/send-otp', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
 
   try {
-    // Check if email already registered
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ error: 'Email already registered' });
 
     const otp = generateOTP();
-    const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
-
+    const expiry = Date.now() + 10 * 60 * 1000;
     otpStore.set(email, { otp, expiry });
 
     await resend.emails.send({
-      from: 'Foretell <noreply@foretell-bet.vercel.app>',
+      from: 'Foretell <onboarding@resend.dev>',
       to: email,
       subject: 'Your Foretell Verification Code',
       html: `
@@ -79,12 +74,11 @@ router.post('/verify-otp', (req, res) => {
   }
   if (stored.otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
 
-  // Mark as verified
   otpStore.set(email, { ...stored, verified: true });
   res.json({ success: true, message: 'Email verified successfully' });
 });
 
-// ✅ REGISTER (requires verified OTP)
+// ✅ REGISTER
 router.post('/register', [
   body('username').trim().isLength({ min: 3, max: 20 }).withMessage('Username must be 3-20 characters'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
@@ -95,7 +89,6 @@ router.post('/register', [
 
   const { username, password, email, referralCode } = req.body;
 
-  // Check OTP verified
   const stored = otpStore.get(email);
   if (!stored || !stored.verified) {
     return res.status(400).json({ error: 'Email not verified. Please verify your email first.' });
@@ -141,13 +134,11 @@ router.post('/register', [
     });
 
     await user.save();
-
-    // Clean up OTP
     otpStore.delete(email);
 
-    // Send welcome email
+    // Welcome email
     await resend.emails.send({
-      from: 'Foretell <noreply@foretell-bet.vercel.app>',
+      from: 'Foretell <onboarding@resend.dev>',
       to: email,
       subject: 'Welcome to Foretell! 🎉',
       html: `
@@ -162,7 +153,7 @@ router.post('/register', [
           <p style="color: #64748b; font-size: 12px;">Good luck and have fun!</p>
         </div>
       `
-    }).catch(() => {}); // Don't fail if welcome email fails
+    }).catch(() => {});
 
     const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 
@@ -179,6 +170,7 @@ router.post('/register', [
   }
 });
 
+// ✅ LOGIN
 router.post('/login', async (req, res) => {
   const { login, password } = req.body;
   try {
@@ -195,6 +187,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// ✅ GET ME
 router.get('/me', authenticateToken, async (req, res) => {
   try {
     const user = await User.findOne({ username: req.user.username });
@@ -205,6 +198,7 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
+// ✅ REFERRAL
 router.get('/referral', authenticateToken, async (req, res) => {
   try {
     const user = await User.findOne({ username: req.user.username });
