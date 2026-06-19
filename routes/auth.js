@@ -4,16 +4,8 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const { User } = require('../config/store');
 const { authenticateToken } = require('../middleware/auth');
-const { Resend } = require('resend');
 
 const router = express.Router();
-const resend = new Resend(process.env.RESEND_API_KEY);
-
-const otpStore = new Map();
-
-function generateOTP() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
 
 function generateReferralCode(username) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -23,60 +15,6 @@ function generateReferralCode(username) {
   }
   return code;
 }
-
-// ✅ SEND OTP
-router.post('/send-otp', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email is required' });
-
-  try {
-    const existing = await User.findOne({ email });
-    if (existing) return res.status(409).json({ error: 'Email already registered' });
-
-    const otp = generateOTP();
-    const expiry = Date.now() + 10 * 60 * 1000;
-    otpStore.set(email, { otp, expiry });
-
-    await resend.emails.send({
-      from: 'Foretell <onboarding@resend.dev>',
-      to: email,
-      subject: 'Your Foretell Verification Code',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; background: #0f212e; color: #fff; padding: 30px; border-radius: 12px;">
-          <h1 style="color: #00e701; font-size: 28px; margin-bottom: 5px;">$ FORETELL</h1>
-          <h2 style="color: #fff; font-size: 20px;">Email Verification</h2>
-          <p style="color: #94a3b8;">Use the code below to verify your email address. It expires in 10 minutes.</p>
-          <div style="background: #213743; border: 2px solid #00BAE6; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
-            <h1 style="color: #00BAE6; font-size: 42px; letter-spacing: 8px; margin: 0;">${otp}</h1>
-          </div>
-          <p style="color: #64748b; font-size: 12px;">If you didn't request this, ignore this email.</p>
-        </div>
-      `
-    });
-
-    res.json({ success: true, message: 'OTP sent to email' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to send OTP' });
-  }
-});
-
-// ✅ VERIFY OTP
-router.post('/verify-otp', (req, res) => {
-  const { email, otp } = req.body;
-  if (!email || !otp) return res.status(400).json({ error: 'Email and OTP required' });
-
-  const stored = otpStore.get(email);
-  if (!stored) return res.status(400).json({ error: 'No OTP found. Please request a new one.' });
-  if (Date.now() > stored.expiry) {
-    otpStore.delete(email);
-    return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
-  }
-  if (stored.otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
-
-  otpStore.set(email, { ...stored, verified: true });
-  res.json({ success: true, message: 'Email verified successfully' });
-});
 
 // ✅ REGISTER
 router.post('/register', [
@@ -88,11 +26,6 @@ router.post('/register', [
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   const { username, password, email, referralCode } = req.body;
-
-  const stored = otpStore.get(email);
-  if (!stored || !stored.verified) {
-    return res.status(400).json({ error: 'Email not verified. Please verify your email first.' });
-  }
 
   try {
     const existingUsername = await User.findOne({ username });
@@ -134,26 +67,6 @@ router.post('/register', [
     });
 
     await user.save();
-    otpStore.delete(email);
-
-    // Welcome email
-    await resend.emails.send({
-      from: 'Foretell <onboarding@resend.dev>',
-      to: email,
-      subject: 'Welcome to Foretell! 🎉',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; background: #0f212e; color: #fff; padding: 30px; border-radius: 12px;">
-          <h1 style="color: #00e701;">$ FORETELL</h1>
-          <h2>Welcome, ${username}! 🎉</h2>
-          <p style="color: #94a3b8;">Your account has been created successfully.</p>
-          <div style="background: #213743; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 0; color: #00e701; font-size: 18px; font-weight: bold;">Starting Balance: GHS ${startingBalance}</p>
-          </div>
-          <p style="color: #94a3b8;">Your referral code: <strong style="color: #00BAE6;">${newReferralCode}</strong></p>
-          <p style="color: #64748b; font-size: 12px;">Good luck and have fun!</p>
-        </div>
-      `
-    }).catch(() => {});
 
     const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 
