@@ -4,10 +4,20 @@ const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const { User } = require('../config/store');
 const { authenticateToken } = require('../middleware/auth');
+const { Resend } = require('resend');
 
 const router = express.Router();
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// ✅ Generate unique referral code
+// Store OTPs temporarily (in production use Redis)
+const otpStore = new Map();
+
+// Generate OTP
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Generate referral code
 function generateReferralCode(username) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = username.toUpperCase().slice(0, 3);
@@ -17,28 +27,88 @@ function generateReferralCode(username) {
   return code;
 }
 
+// ✅ SEND OTP TO EMAIL
+router.post('/send-otp', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+
+  try {
+    // Check if email already registered
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
+
+    const otp = generateOTP();
+    const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+    otpStore.set(email, { otp, expiry });
+
+    await resend.emails.send({
+      from: 'Foretell <noreply@foretell-bet.vercel.app>',
+      to: email,
+      subject: 'Your Foretell Verification Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; background: #0f212e; color: #fff; padding: 30px; border-radius: 12px;">
+          <h1 style="color: #00e701; font-size: 28px; margin-bottom: 5px;">$ FORETELL</h1>
+          <h2 style="color: #fff; font-size: 20px;">Email Verification</h2>
+          <p style="color: #94a3b8;">Use the code below to verify your email address. It expires in 10 minutes.</p>
+          <div style="background: #213743; border: 2px solid #00BAE6; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
+            <h1 style="color: #00BAE6; font-size: 42px; letter-spacing: 8px; margin: 0;">${otp}</h1>
+          </div>
+          <p style="color: #64748b; font-size: 12px;">If you didn't request this, ignore this email.</p>
+        </div>
+      `
+    });
+
+    res.json({ success: true, message: 'OTP sent to email' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to send OTP' });
+  }
+});
+
+// ✅ VERIFY OTP
+router.post('/verify-otp', (req, res) => {
+  const { email, otp } = req.body;
+  if (!email || !otp) return res.status(400).json({ error: 'Email and OTP required' });
+
+  const stored = otpStore.get(email);
+  if (!stored) return res.status(400).json({ error: 'No OTP found. Please request a new one.' });
+  if (Date.now() > stored.expiry) {
+    otpStore.delete(email);
+    return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
+  }
+  if (stored.otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
+
+  // Mark as verified
+  otpStore.set(email, { ...stored, verified: true });
+  res.json({ success: true, message: 'Email verified successfully' });
+});
+
+// ✅ REGISTER (requires verified OTP)
 router.post('/register', [
   body('username').trim().isLength({ min: 3, max: 20 }).withMessage('Username must be 3-20 characters'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-  body('email').optional().isEmail().withMessage('Invalid email address'),
+  body('email').isEmail().withMessage('Invalid email address'),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
   const { username, password, email, referralCode } = req.body;
 
+  // Check OTP verified
+  const stored = otpStore.get(email);
+  if (!stored || !stored.verified) {
+    return res.status(400).json({ error: 'Email not verified. Please verify your email first.' });
+  }
+
   try {
     const existingUsername = await User.findOne({ username });
     if (existingUsername) return res.status(409).json({ error: 'Username already taken' });
 
-    if (email) {
-      const existingEmail = await User.findOne({ email });
-      if (existingEmail) return res.status(409).json({ error: 'Email already registered' });
-    }
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) return res.status(409).json({ error: 'Email already registered' });
 
-    // ✅ Generate unique referral code for new user
     let newReferralCode = generateReferralCode(username);
-    // Make sure it's unique
     let codeExists = await User.findOne({ referralCode: newReferralCode });
     while (codeExists) {
       newReferralCode = generateReferralCode(username);
@@ -48,13 +118,11 @@ router.post('/register', [
     const hashedPassword = await bcrypt.hash(password, 10);
     const startingBalance = parseFloat(process.env.STARTING_BALANCE) || 1000;
 
-    // ✅ Check if referred by someone
     let referredByUsername = null;
     if (referralCode) {
       const referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
       if (referrer) {
         referredByUsername = referrer.username;
-        // ✅ Give referrer bonus (5% of starting balance)
         const referralBonus = parseFloat((startingBalance * 0.05).toFixed(2));
         referrer.balance = parseFloat((referrer.balance + referralBonus).toFixed(2));
         referrer.referralCount = (referrer.referralCount || 0) + 1;
@@ -73,6 +141,28 @@ router.post('/register', [
     });
 
     await user.save();
+
+    // Clean up OTP
+    otpStore.delete(email);
+
+    // Send welcome email
+    await resend.emails.send({
+      from: 'Foretell <noreply@foretell-bet.vercel.app>',
+      to: email,
+      subject: 'Welcome to Foretell! 🎉',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; background: #0f212e; color: #fff; padding: 30px; border-radius: 12px;">
+          <h1 style="color: #00e701;">$ FORETELL</h1>
+          <h2>Welcome, ${username}! 🎉</h2>
+          <p style="color: #94a3b8;">Your account has been created successfully.</p>
+          <div style="background: #213743; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 0; color: #00e701; font-size: 18px; font-weight: bold;">Starting Balance: GHS ${startingBalance}</p>
+          </div>
+          <p style="color: #94a3b8;">Your referral code: <strong style="color: #00BAE6;">${newReferralCode}</strong></p>
+          <p style="color: #64748b; font-size: 12px;">Good luck and have fun!</p>
+        </div>
+      `
+    }).catch(() => {}); // Don't fail if welcome email fails
 
     const token = jwt.sign({ username }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 
@@ -115,13 +205,11 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ Get referral info
 router.get('/referral', authenticateToken, async (req, res) => {
   try {
     const user = await User.findOne({ username: req.user.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Generate code if user doesn't have one yet
     if (!user.referralCode) {
       let code = generateReferralCode(user.username);
       let exists = await User.findOne({ referralCode: code });
