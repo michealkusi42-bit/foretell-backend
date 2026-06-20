@@ -10,9 +10,11 @@ const userSchema = new mongoose.Schema({
   referredBy: { type: String, default: null },
   referralCount: { type: Number, default: 0 },
   referralEarnings: { type: Number, default: 0 },
-  // ✅ NEW: VIP spin fields
-  qualifiedReferralCount: { type: Number, default: 0 }, // referred friends who placed a bet >= GHS50
-  hasPlacedQualifyingBet: { type: Boolean, default: false }, // prevents double-counting this user as a qualifier
+  // ✅ NEW: admin access flag
+  isAdmin: { type: Boolean, default: false },
+  // ✅ VIP spin fields
+  qualifiedReferralCount: { type: Number, default: 0 },
+  hasPlacedQualifyingBet: { type: Boolean, default: false },
   vipSpinsUsed: { type: Number, default: 0 },
   freeSpinsBalance: { type: Number, default: 0 }
 });
@@ -28,12 +30,10 @@ const transactionSchema = new mongoose.Schema({
   balanceAfter: Number,
   timestamp: Date,
   updatedAt: Date,
-  // ✅ Status fields
   status: { type: String, default: 'success', enum: ['pending', 'under_review', 'success', 'rejected'] },
   reference: String,
   method: String,
   address: String,
-  // game fields
   outcome: String,
   choice: String,
   multiplier: Number,
@@ -51,13 +51,13 @@ const transactionSchema = new mongoose.Schema({
   handName: String,
 });
 
-// ✅ NEW: log of VIP spin wins, also powers GET /api/vip-spin/winners
 const vipSpinWinSchema = new mongoose.Schema({
   id: String,
   username: String,
   prizeType: { type: String, enum: ['credit', 'free_spins', 'merch'] },
   prizeLabel: String,
   prizeValue: Number,
+  collected: { type: Boolean, default: false },
   timestamp: Date
 });
 
