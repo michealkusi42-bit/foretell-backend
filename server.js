@@ -14,6 +14,7 @@ const affiliateRoutes = require('./routes/affiliates');
 const vipSpinRoutes = require('./routes/vip-spin');
 const { router: adminRouter } = require('./routes/admin');
 const offlineGameRoutes = require('./routes/offline-game');
+const { router: paystackRoutes } = require('./routes/paystack');
 const { authenticateToken } = require('./middleware/auth');
 const { registerGameHandlers } = require('./games/socketHandler');
 
@@ -22,6 +23,8 @@ const server = http.createServer(app);
 
 // ✅ CORS origins
 const allowedOrigins = [
+  'https://fortellbet.com',
+  'https://www.fortellbet.com',
   'https://foretell-bet.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001'
@@ -53,6 +56,13 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
+
+// ⚠️ IMPORTANT: the Paystack webhook needs the RAW request body to verify
+// Paystack's signature. It must be registered BEFORE express.json() runs,
+// otherwise the body gets parsed into an object and signature checks fail.
+// (The route itself also declares express.raw() again for clarity/safety.)
+app.use('/api/paystack/webhook', express.raw({ type: 'application/json' }));
+
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
@@ -92,6 +102,7 @@ app.use('/api/affiliates', affiliateRoutes);
 app.use('/api/vip-spin', vipSpinRoutes);
 app.use('/api/admin', adminRouter);
 app.use('/api/offline-game', offlineGameRoutes);
+app.use('/api/paystack', paystackRoutes);
 
 app.get('/api/setting/site', (req, res) => res.json({}));
 app.get('/api/casino/recommend', (req, res) => res.json(mockGames));
