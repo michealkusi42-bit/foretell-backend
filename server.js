@@ -11,7 +11,7 @@ const walletRoutes = require('./routes/wallet');
 const gameRoutes = require('./routes/games');
 const leaderboardRoutes = require('./routes/leaderboard');
 const affiliateRoutes = require('./routes/affiliates');
-const vipSpinRoutes = require('./routes/vip-spin'); // ✅ NEW
+const vipSpinRoutes = require('./routes/vip-spin');
 const { router: adminRouter } = require('./routes/admin');
 const offlineGameRoutes = require('./routes/offline-game');
 const { authenticateToken } = require('./middleware/auth');
@@ -29,7 +29,6 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -38,21 +37,22 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-password']
 };
 
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     methods: ['GET', 'POST'],
-    credentials: true
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password']
   }
 });
 
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // ✅ Handle preflight requests
+app.options('*', cors(corsOptions));
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
@@ -89,7 +89,7 @@ app.use('/api/wallet', authenticateToken, walletRoutes);
 app.use('/api/games', authenticateToken, gameRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/affiliates', affiliateRoutes);
-app.use('/api/vip-spin', vipSpinRoutes); // ✅ NEW — auth is applied per-route inside the file
+app.use('/api/vip-spin', vipSpinRoutes);
 app.use('/api/admin', adminRouter);
 app.use('/api/offline-game', offlineGameRoutes);
 
@@ -112,7 +112,6 @@ app.get('/api/player/balance', authenticateToken, (req, res) => res.json({ balan
 app.get('/api/sport', (req, res) => res.json([]));
 app.get('/api/bonus', (req, res) => res.json([]));
 app.get('/api/package', (req, res) => res.json([]));
-
 app.get('/api/player/my-games', authenticateToken, (req, res) => res.json([]));
 app.post('/api/player/transaction', authenticateToken, (req, res) => res.json({ promotions: [], transactions: [], system: [], count: 0, promotionsCount: 0, transactionsCount: 0, systemCount: 0 }));
 app.get('/api/player/kyc', authenticateToken, (req, res) => res.json({ status: 'unverified' }));
