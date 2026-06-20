@@ -4,8 +4,6 @@ const { User, Transaction } = require('../config/store');
 
 const router = express.Router();
 
-// ─── Per-user game overrides (in memory) ────────────────────────────────────
-// Structure: { username: { game: override } }
 const userGameOverrides = {};
 const gameOverrides = {};
 
@@ -22,17 +20,12 @@ function clearUserOverride(username, game) {
   }
 }
 
-// ─── Admin password gate ─────────────────────────────────────────────────────
-// ✅ NEW: single shared secret instead of checking a per-user isAdmin flag.
-// Set ADMIN_PANEL_PASSWORD in your backend's environment variables
-// (Render/Vercel dashboard → Environment Variables), then redeploy.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: 'Too many attempts. Try again in 15 minutes.' }
 });
 
-// POST /api/admin/login — the frontend calls this first, before anything else
 router.post('/login', loginLimiter, (req, res) => {
   const { password } = req.body;
   if (!process.env.ADMIN_PANEL_PASSWORD) {
@@ -52,7 +45,6 @@ function requireAdminPassword(req, res, next) {
   next();
 }
 
-// Every route below this line requires the password header
 router.use(requireAdminPassword);
 
 // ─── DASHBOARD STATS ─────────────────────────────────────────────────────────
@@ -60,11 +52,11 @@ router.get('/stats', async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalDeposits = await Transaction.aggregate([
-      { $match: { type: 'deposit', status: 'approved' } },
+      { $match: { type: 'deposit', status: 'success' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const totalWithdrawals = await Transaction.aggregate([
-      { $match: { type: 'withdraw', status: 'approved' } },
+      { $match: { type: 'withdraw', status: 'success' } },
       { $group: { _id: null, total: { $sum: '$amount' } } }
     ]);
     const totalBets = await Transaction.aggregate([
@@ -117,7 +109,7 @@ router.post('/deposits/:id/approve', async (req, res) => {
     user.balance = parseFloat((user.balance + tx.amount).toFixed(2));
     await user.save();
 
-    tx.status = 'approved';
+    tx.status = 'success';
     tx.processedAt = new Date();
     await tx.save();
 
@@ -162,7 +154,7 @@ router.post('/withdrawals/:id/approve', async (req, res) => {
     if (!tx) return res.status(404).json({ error: 'Transaction not found' });
     if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
 
-    tx.status = 'approved';
+    tx.status = 'success';
     tx.processedAt = new Date();
     await tx.save();
 
@@ -206,7 +198,7 @@ router.get('/users', async (req, res) => {
 
 router.post('/users/:username/adjust-balance', async (req, res) => {
   try {
-    const { amount, action } = req.body; // action: 'add' | 'deduct' | 'set'
+    const { amount, action } = req.body;
     const user = await User.findOne({ username: req.params.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -221,19 +213,26 @@ router.post('/users/:username/adjust-balance', async (req, res) => {
   }
 });
 
+// ─── SUSPEND / UNSUSPEND (toggle) ────────────────────────────────────────────
 router.post('/users/:username/suspend', async (req, res) => {
   try {
     const user = await User.findOne({ username: req.params.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
     user.suspended = !user.suspended;
     await user.save();
-    res.json({ success: true, suspended: user.suspended });
+    res.json({
+      success: true,
+      suspended: user.suspended,
+      message: user.suspended
+        ? `${req.params.username} has been suspended`
+        : `${req.params.username} has been unsuspended`
+    });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// ─── GAME OVERRIDES (per user) ───────────────────────────────────────────────
+// ─── GAME OVERRIDES ──────────────────────────────────────────────────────────
 router.post('/overrides/:username', async (req, res) => {
   try {
     const { game, value } = req.body;
