@@ -6,13 +6,12 @@ const userSchema = new mongoose.Schema({
   password: String,
   balance: { type: Number, default: 0 },
   currency: { type: String, default: 'GHS' },
+  isAdmin: { type: Boolean, default: false },
+  suspended: { type: Boolean, default: false },
   referralCode: { type: String, unique: true, sparse: true },
   referredBy: { type: String, default: null },
   referralCount: { type: Number, default: 0 },
   referralEarnings: { type: Number, default: 0 },
-  // ✅ NEW: admin access flag
-  isAdmin: { type: Boolean, default: false },
-  // ✅ VIP spin fields
   qualifiedReferralCount: { type: Number, default: 0 },
   hasPlacedQualifyingBet: { type: Boolean, default: false },
   vipSpinsUsed: { type: Number, default: 0 },
@@ -30,7 +29,16 @@ const transactionSchema = new mongoose.Schema({
   balanceAfter: Number,
   timestamp: Date,
   updatedAt: Date,
-  status: { type: String, default: 'success', enum: ['pending', 'under_review', 'success', 'rejected'] },
+  // 'success' = completed game transaction
+  // 'pending' = deposit/withdrawal waiting for admin
+  // 'approved' = deposit/withdrawal approved by admin
+  // 'rejected' = deposit/withdrawal rejected by admin
+  status: {
+    type: String,
+    default: 'success',
+    enum: ['pending', 'under_review', 'success', 'approved', 'rejected']
+  },
+  processedAt: { type: Date, default: null },
   reference: String,
   method: String,
   address: String,
