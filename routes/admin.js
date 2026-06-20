@@ -1,29 +1,14 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const { User, Transaction } = require('../config/store');
-const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
 // ─── Per-user game overrides (in memory) ────────────────────────────────────
 // Structure: { username: { game: override } }
-// Override values per game:
-//   coinflip:  'win' | 'lose' | 'heads' | 'tails'
-//   dice:      'win' | 'lose' | number (exact roll)
-//   hilo:      'win' | 'lose' | number (exact next card 1-13)
-//   mines:     'win' | 'lose' | [array of mine positions 0-24]
-//   roulette:  'win' | 'lose' | number (exact result 0-36)
-//   updown:    'win' | 'lose' | 'up' | 'down'
-//   crash:     number (exact crash point e.g. 1.5)
-//   lottery:   'win' | 'lose' | [array of 5 winning numbers]
-//   racing:    'win' | 'lose' | number (winning horse 1-8)
-//   bingo:     'win' | 'lose' | [array of drawn numbers]
-//   poker:     'win' | 'lose'
 const userGameOverrides = {};
-
-// Legacy global overrides (kept for backwards compat, per-user takes priority)
 const gameOverrides = {};
 
-// Get override for a specific user and game
 function getUserOverride(username, game) {
   if (userGameOverrides[username] && userGameOverrides[username][game] !== undefined) {
     return userGameOverrides[username][game];
@@ -31,26 +16,44 @@ function getUserOverride(username, game) {
   return gameOverrides[game] !== undefined ? gameOverrides[game] : null;
 }
 
-// Clear override after it's been used (one-shot)
 function clearUserOverride(username, game) {
   if (userGameOverrides[username]) {
     delete userGameOverrides[username][game];
   }
 }
 
-// ─── Admin middleware ────────────────────────────────────────────────────────
-async function adminOnly(req, res, next) {
-  try {
-    const user = await User.findOne({ username: req.user.username });
-    if (!user || !user.isAdmin) return res.status(403).json({ error: 'Admin only' });
-    next();
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+// ─── Admin password gate ─────────────────────────────────────────────────────
+// ✅ NEW: single shared secret instead of checking a per-user isAdmin flag.
+// Set ADMIN_PANEL_PASSWORD in your backend's environment variables
+// (Render/Vercel dashboard → Environment Variables), then redeploy.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many attempts. Try again in 15 minutes.' }
+});
+
+// POST /api/admin/login — the frontend calls this first, before anything else
+router.post('/login', loginLimiter, (req, res) => {
+  const { password } = req.body;
+  if (!process.env.ADMIN_PANEL_PASSWORD) {
+    return res.status(500).json({ error: 'Admin password not configured on the server' });
   }
+  if (password === process.env.ADMIN_PANEL_PASSWORD) {
+    return res.json({ success: true });
+  }
+  res.status(401).json({ error: 'Incorrect password' });
+});
+
+function requireAdminPassword(req, res, next) {
+  const provided = req.headers['x-admin-password'];
+  if (!provided || provided !== process.env.ADMIN_PANEL_PASSWORD) {
+    return res.status(403).json({ error: 'Invalid admin password' });
+  }
+  next();
 }
 
-router.use(authenticateToken);
-router.use(adminOnly);
+// Every route below this line requires the password header
+router.use(requireAdminPassword);
 
 // ─── DASHBOARD STATS ─────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
@@ -111,7 +114,6 @@ router.post('/deposits/:id/approve', async (req, res) => {
     const user = await User.findOne({ username: tx.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // Credit balance on approval
     user.balance = parseFloat((user.balance + tx.amount).toFixed(2));
     await user.save();
 
@@ -160,7 +162,6 @@ router.post('/withdrawals/:id/approve', async (req, res) => {
     if (!tx) return res.status(404).json({ error: 'Transaction not found' });
     if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
 
-    // Balance already deducted on submission — just mark approved
     tx.status = 'approved';
     tx.processedAt = new Date();
     await tx.save();
@@ -177,7 +178,6 @@ router.post('/withdrawals/:id/reject', async (req, res) => {
     if (!tx) return res.status(404).json({ error: 'Transaction not found' });
     if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
 
-    // Refund balance since it was deducted on submission
     const user = await User.findOne({ username: tx.username });
     if (user) {
       user.balance = parseFloat((user.balance + tx.amount).toFixed(2));
@@ -234,40 +234,28 @@ router.post('/users/:username/suspend', async (req, res) => {
 });
 
 // ─── GAME OVERRIDES (per user) ───────────────────────────────────────────────
-// Set override for a specific user's next game
 router.post('/overrides/:username', async (req, res) => {
   try {
     const { game, value } = req.body;
-    // value examples:
-    //   { game: 'coinflip', value: 'win' }
-    //   { game: 'dice', value: 'lose' }
-    //   { game: 'mines', value: [0,1,2] }
-    //   { game: 'lottery', value: [5,12,23,34,45] }
-    //   { game: 'crash', value: 1.5 }
-
     if (!userGameOverrides[req.params.username]) {
       userGameOverrides[req.params.username] = {};
     }
     userGameOverrides[req.params.username][game] = value;
-
     res.json({ success: true, message: `Override set: ${req.params.username} → ${game} → ${JSON.stringify(value)}` });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Get current overrides for a user
 router.get('/overrides/:username', async (req, res) => {
   res.json({ success: true, data: userGameOverrides[req.params.username] || {} });
 });
 
-// Clear all overrides for a user
 router.delete('/overrides/:username', async (req, res) => {
   delete userGameOverrides[req.params.username];
   res.json({ success: true, message: 'All overrides cleared' });
 });
 
-// Clear override for a specific game
 router.delete('/overrides/:username/:game', async (req, res) => {
   if (userGameOverrides[req.params.username]) {
     delete userGameOverrides[req.params.username][req.params.game];
