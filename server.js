@@ -14,42 +14,41 @@ const affiliateRoutes = require('./routes/affiliates');
 const vipSpinRoutes = require('./routes/vip-spin');
 const { router: adminRouter } = require('./routes/admin');
 const offlineGameRoutes = require('./routes/offline-game');
-const { router: paystackRoutes } = require('./routes/paystack');
+const paystackRoutes = require('./routes/paystack');
 const { authenticateToken } = require('./middleware/auth');
 const { registerGameHandlers } = require('./games/socketHandler');
 
 const app = express();
 const server = http.createServer(app);
 
-// ✅ CORS origins
 const allowedOrigins = [
-  'https://fortellbet.com',
-  'https://www.fortellbet.com',
-  'https://foretell-bet.vercel.app',
-  'http://localhost:3000',
-  'http://localhost:3001'
+ 'https://fortellbet.com',
+ 'https://www.fortellbet.com',
+ 'https://foretell-bet.vercel.app',
+ 'http://localhost:3000',
+ 'http://localhost:3001'
 ];
 
 const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-password']
+ origin: function (origin, callback) {
+   if (!origin || allowedOrigins.includes(origin)) {
+     callback(null, true);
+   } else {
+     callback(new Error('Not allowed by CORS'));
+   }
+ },
+ credentials: true,
+ methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+ allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-password']
 };
 
 const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST'],
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password']
-  }
+ cors: {
+   origin: allowedOrigins,
+   methods: ['GET', 'POST'],
+   credentials: true,
+   allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-password']
+ }
 });
 
 app.set('trust proxy', 1);
@@ -57,40 +56,36 @@ app.use(helmet());
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-// ⚠️ IMPORTANT: the Paystack webhook needs the RAW request body to verify
-// Paystack's signature. It must be registered BEFORE express.json() runs,
-// otherwise the body gets parsed into an object and signature checks fail.
-// (The route itself also declares express.raw() again for clarity/safety.)
 app.use('/api/paystack/webhook', express.raw({ type: 'application/json' }));
 
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
 app.use('/api/games', (req, res, next) => {
-  const { gameOverrides } = require('./routes/admin');
-  if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
-  next();
+ const { gameOverrides } = require('./routes/admin');
+ if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
+ next();
 });
 
 app.use('/api/offline-game', (req, res, next) => {
-  const { gameOverrides } = require('./routes/admin');
-  if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
-  next();
+ const { gameOverrides } = require('./routes/admin');
+ if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
+ next();
 });
 
 const mockGames = [
-  { id: '1', name: 'Sweet Bonanza', image: 'https://placehold.co/200x150?text=Sweet+Bonanza' },
-  { id: '2', name: 'Gates of Olympus', image: 'https://placehold.co/200x150?text=Gates+of+Olympus' },
-  { id: '3', name: 'Big Bass Bonanza', image: 'https://placehold.co/200x150?text=Big+Bass' },
-  { id: '4', name: 'Wolf Gold', image: 'https://placehold.co/200x150?text=Wolf+Gold' },
-  { id: '5', name: 'Starburst', image: 'https://placehold.co/200x150?text=Starburst' },
-  { id: '6', name: 'Book of Dead', image: 'https://placehold.co/200x150?text=Book+of+Dead' },
-  { id: '7', name: 'Gonzo Quest', image: 'https://placehold.co/200x150?text=Gonzo+Quest' },
-  { id: '8', name: 'Mega Moolah', image: 'https://placehold.co/200x150?text=Mega+Moolah' },
-  { id: '9', name: 'Reactoonz', image: 'https://placehold.co/200x150?text=Reactoonz' },
-  { id: '10', name: 'Dead or Alive', image: 'https://placehold.co/200x150?text=Dead+or+Alive' },
-  { id: '11', name: 'Fire Joker', image: 'https://placehold.co/200x150?text=Fire+Joker' },
-  { id: '12', name: 'Jammin Jars', image: 'https://placehold.co/200x150?text=Jammin+Jars' }
+ { id: '1', name: 'Sweet Bonanza', image: 'https://placehold.co/200x150?text=Sweet+Bonanza' },
+ { id: '2', name: 'Gates of Olympus', image: 'https://placehold.co/200x150?text=Gates+of+Olympus' },
+ { id: '3', name: 'Big Bass Bonanza', image: 'https://placehold.co/200x150?text=Big+Bass' },
+ { id: '4', name: 'Wolf Gold', image: 'https://placehold.co/200x150?text=Wolf+Gold' },
+ { id: '5', name: 'Starburst', image: 'https://placehold.co/200x150?text=Starburst' },
+ { id: '6', name: 'Book of Dead', image: 'https://placehold.co/200x150?text=Book+of+Dead' },
+ { id: '7', name: 'Gonzo Quest', image: 'https://placehold.co/200x150?text=Gonzo+Quest' },
+ { id: '8', name: 'Mega Moolah', image: 'https://placehold.co/200x150?text=Mega+Moolah' },
+ { id: '9', name: 'Reactoonz', image: 'https://placehold.co/200x150?text=Reactoonz' },
+ { id: '10', name: 'Dead or Alive', image: 'https://placehold.co/200x150?text=Dead+or+Alive' },
+ { id: '11', name: 'Fire Joker', image: 'https://placehold.co/200x150?text=Fire+Joker' },
+ { id: '12', name: 'Jammin Jars', image: 'https://placehold.co/200x150?text=Jammin+Jars' }
 ];
 
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
@@ -127,7 +122,7 @@ app.get('/api/player/my-games', authenticateToken, (req, res) => res.json([]));
 app.post('/api/player/transaction', authenticateToken, (req, res) => res.json({ promotions: [], transactions: [], system: [], count: 0, promotionsCount: 0, transactionsCount: 0, systemCount: 0 }));
 app.get('/api/player/kyc', authenticateToken, (req, res) => res.json({ status: 'unverified' }));
 app.post('/api/player/kyc', authenticateToken, (req, res) => res.json({ status: 'pending' }));
-app.get('/api/currency/list', (req, res) => res.json([{ code: 'USD', name: 'US Dollar', symbol: '$' }]));
+app.get('/api/currency/list', (req, res) => res.json([{ code: 'GHS', name: 'Ghana Cedis', symbol: 'GH₵' }]));
 app.post('/api/nowpay/deposit', authenticateToken, (req, res) => res.json({ status: 'pending', address: '' }));
 app.post('/api/withdraw', authenticateToken, (req, res) => res.json({ status: 'pending' }));
 app.get('/api/player/username', authenticateToken, (req, res) => res.json({}));
@@ -143,24 +138,24 @@ app.get('/api/casino/ag-game-detail/:code', (req, res) => res.json({}));
 app.get('/api/bonus/:id', (req, res) => res.json({}));
 
 io.use((socket, next) => {
-  const token = socket.handshake.auth && socket.handshake.auth.token;
-  if (!token) return next(new Error('Authentication required'));
-  try {
-    const jwt = require('jsonwebtoken');
-    socket.user = jwt.verify(token, process.env.JWT_SECRET);
-    next();
-  } catch (e) { next(new Error('Invalid token')); }
+ const token = socket.handshake.auth && socket.handshake.auth.token;
+ if (!token) return next(new Error('Authentication required'));
+ try {
+   const jwt = require('jsonwebtoken');
+   socket.user = jwt.verify(token, process.env.JWT_SECRET);
+   next();
+ } catch (e) { next(new Error('Invalid token')); }
 });
 
 io.on('connection', (socket) => {
-  console.log('Player connected: ' + socket.user.username);
-  registerGameHandlers(io, socket);
-  socket.on('disconnect', () => console.log('Player disconnected: ' + socket.user.username));
+ console.log('Player connected: ' + socket.user.username);
+ registerGameHandlers(io, socket);
+ socket.on('disconnect', () => console.log('Player disconnected: ' + socket.user.username));
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log('Foretell Backend running on port ' + PORT);
+ console.log('Foretell Backend running on port ' + PORT);
 });
 
 module.exports = { app, io };
