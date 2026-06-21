@@ -6,7 +6,7 @@ const router = express.Router();
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-async function sendWithdrawalEmail(username, amount, method, address) {
+async function sendWithdrawalEmail(username, amount, network, address) {
   try {
     await resend.emails.send({
       from: 'Foretell <onboarding@resend.dev>',
@@ -16,7 +16,7 @@ async function sendWithdrawalEmail(username, amount, method, address) {
         <h2>New Withdrawal Request</h2>
         <p><b>User:</b> ${username}</p>
         <p><b>Amount:</b> GHS ${amount}</p>
-        <p><b>Method:</b> ${method}</p>
+        <p><b>Network:</b> ${network}</p>
         <p><b>MoMo Number:</b> ${address}</p>
         <p><b>Time:</b> ${new Date().toLocaleString()}</p>
         <br/>
@@ -50,6 +50,37 @@ router.get('/transactions', async (req, res) => {
   }
 });
 
+// Save MoMo number
+router.patch('/momo', async (req, res) => {
+  try {
+    const { momoNetwork, momoNumber } = req.body;
+    if (!momoNetwork || !momoNumber) return res.status(400).json({ error: 'Network and number required' });
+    if (momoNumber.length < 10) return res.status(400).json({ error: 'Invalid MoMo number' });
+
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    user.momoNetwork = momoNetwork;
+    user.momoNumber = momoNumber;
+    await user.save();
+
+    res.json({ success: true, message: 'MoMo number saved successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Get saved MoMo
+router.get('/momo', async (req, res) => {
+  try {
+    const user = await User.findOne({ username: req.user.username });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true, momoNetwork: user.momoNetwork || '', momoNumber: user.momoNumber || '' });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Request withdrawal
 router.post('/withdraw', async (req, res) => {
   try {
@@ -63,6 +94,11 @@ router.post('/withdraw', async (req, res) => {
     if (withdrawAmount < 10) return res.status(400).json({ error: 'Minimum withdrawal is GHS 10' });
     if (user.balance < withdrawAmount) return res.status(400).json({ error: 'Insufficient balance' });
 
+    const withdrawAddress = address || user.momoNumber;
+    const withdrawNetwork = user.momoNetwork || method || 'momo';
+
+    if (!withdrawAddress) return res.status(400).json({ error: 'Please bind your MoMo number in profile settings first' });
+
     user.balance = parseFloat((user.balance - withdrawAmount).toFixed(2));
     await user.save();
 
@@ -71,14 +107,14 @@ router.post('/withdraw', async (req, res) => {
       username: req.user.username,
       type: 'withdraw',
       amount: withdrawAmount,
-      method: method || 'momo',
-      address: address,
+      method: withdrawNetwork,
+      address: withdrawAddress,
       status: 'pending',
       timestamp: new Date()
     });
     await tx.save();
 
-    await sendWithdrawalEmail(req.user.username, withdrawAmount, method || 'momo', address);
+    await sendWithdrawalEmail(req.user.username, withdrawAmount, withdrawNetwork, withdrawAddress);
 
     res.json({ success: true, message: 'Withdrawal request submitted.', newBalance: user.balance });
   } catch (err) {
