@@ -15,7 +15,12 @@ const userSchema = new mongoose.Schema({
   qualifiedReferralCount: { type: Number, default: 0 },
   hasPlacedQualifyingBet: { type: Boolean, default: false },
   vipSpinsUsed: { type: Number, default: 0 },
-  freeSpinsBalance: { type: Number, default: 0 }
+  freeSpinsBalance: { type: Number, default: 0 },
+  // ✅ Saved payment details
+  momoNumber: { type: String, default: '' },
+  momoProvider: { type: String, default: 'mtn' }, // mtn, vodafone, tigo
+  cryptoAddress: { type: String, default: '' },
+  cryptoNetwork: { type: String, default: '' },
 });
 
 const transactionSchema = new mongoose.Schema({
@@ -29,10 +34,6 @@ const transactionSchema = new mongoose.Schema({
   balanceAfter: Number,
   timestamp: Date,
   updatedAt: Date,
-  // 'success' = completed game transaction
-  // 'pending' = deposit/withdrawal waiting for admin
-  // 'approved' = deposit/withdrawal approved by admin
-  // 'rejected' = deposit/withdrawal rejected by admin
   status: {
     type: String,
     default: 'success',
@@ -42,6 +43,9 @@ const transactionSchema = new mongoose.Schema({
   reference: String,
   method: String,
   address: String,
+  provider: String,
+  phone: String,
+  network: String,
   outcome: String,
   choice: String,
   multiplier: Number,
@@ -57,6 +61,7 @@ const transactionSchema = new mongoose.Schema({
   horse: Number,
   drawnNumbers: [Number],
   handName: String,
+  paystackTransferCode: String,
 });
 
 const vipSpinWinSchema = new mongoose.Schema({
