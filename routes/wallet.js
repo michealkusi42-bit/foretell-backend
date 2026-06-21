@@ -6,7 +6,7 @@ const router = express.Router();
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-async function sendWithdrawalEmail(username, amount, network, address) {
+async function sendWithdrawalEmail(username, amount, network, address, accountName) {
   try {
     await resend.emails.send({
       from: 'Foretell <onboarding@resend.dev>',
@@ -17,6 +17,7 @@ async function sendWithdrawalEmail(username, amount, network, address) {
         <p><b>User:</b> ${username}</p>
         <p><b>Amount:</b> GHS ${amount}</p>
         <p><b>Network:</b> ${network}</p>
+        <p><b>Account Name:</b> ${accountName || 'Not provided'}</p>
         <p><b>MoMo Number:</b> ${address}</p>
         <p><b>Time:</b> ${new Date().toLocaleString()}</p>
         <br/>
@@ -53,8 +54,9 @@ router.get('/transactions', async (req, res) => {
 // Save MoMo number
 router.patch('/momo', async (req, res) => {
   try {
-    const { momoNetwork, momoNumber } = req.body;
+    const { momoNetwork, momoNumber, momoName } = req.body;
     if (!momoNetwork || !momoNumber) return res.status(400).json({ error: 'Network and number required' });
+    if (!momoName || momoName.trim().length < 3) return res.status(400).json({ error: 'Account name required' });
     if (momoNumber.length < 10) return res.status(400).json({ error: 'Invalid MoMo number' });
 
     const user = await User.findOne({ username: req.user.username });
@@ -62,6 +64,7 @@ router.patch('/momo', async (req, res) => {
 
     user.momoNetwork = momoNetwork;
     user.momoNumber = momoNumber;
+    user.momoName = momoName;
     await user.save();
 
     res.json({ success: true, message: 'MoMo number saved successfully' });
@@ -75,7 +78,7 @@ router.get('/momo', async (req, res) => {
   try {
     const user = await User.findOne({ username: req.user.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ success: true, momoNetwork: user.momoNetwork || '', momoNumber: user.momoNumber || '' });
+    res.json({ success: true, momoNetwork: user.momoNetwork || '', momoNumber: user.momoNumber || '', momoName: user.momoName || '' });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -96,6 +99,7 @@ router.post('/withdraw', async (req, res) => {
 
     const withdrawAddress = address || user.momoNumber;
     const withdrawNetwork = user.momoNetwork || method || 'momo';
+    const withdrawName = user.momoName || 'Not provided';
 
     if (!withdrawAddress) return res.status(400).json({ error: 'Please bind your MoMo number in profile settings first' });
 
@@ -114,7 +118,7 @@ router.post('/withdraw', async (req, res) => {
     });
     await tx.save();
 
-    await sendWithdrawalEmail(req.user.username, withdrawAmount, withdrawNetwork, withdrawAddress);
+    await sendWithdrawalEmail(req.user.username, withdrawAmount, withdrawNetwork, withdrawAddress, withdrawName);
 
     res.json({ success: true, message: 'Withdrawal request submitted.', newBalance: user.balance });
   } catch (err) {
