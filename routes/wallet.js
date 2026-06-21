@@ -311,4 +311,4 @@ router.delete('/overrides/:username/:game', async (req, res) => {
   res.json({ success: true, message: `Override cleared: ${req.params.username} → ${req.params.game}` });
 });
 
-module.exports = { router, gameOverrides, getUserOverride, clearUserOverride };
+module.exports =  router, 
