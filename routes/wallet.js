@@ -1,23 +1,16 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { User, Transaction } = require('../config/store');
 
 const router = express.Router();
 
-// Email transporter
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function sendWithdrawalEmail(username, amount, method, address) {
   try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_USER,
+    await resend.emails.send({
+      from: 'Foretell <onboarding@resend.dev>',
+      to: 'michealkusi42@gmail.com',
       subject: '🚨 New Withdrawal Request - Foretell',
       html: `
         <h2>New Withdrawal Request</h2>
@@ -85,7 +78,6 @@ router.post('/withdraw', async (req, res) => {
     });
     await tx.save();
 
-    // Send email notification
     await sendWithdrawalEmail(req.user.username, withdrawAmount, method || 'momo', address);
 
     res.json({ success: true, message: 'Withdrawal request submitted.', newBalance: user.balance });
