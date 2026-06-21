@@ -1,7 +1,40 @@
 const express = require('express');
+const nodemailer = require('nodemailer');
 const { User, Transaction } = require('../config/store');
 
 const router = express.Router();
+
+// Email transporter
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
+
+async function sendWithdrawalEmail(username, amount, method, address) {
+  try {
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_USER,
+      subject: '🚨 New Withdrawal Request - Foretell',
+      html: `
+        <h2>New Withdrawal Request</h2>
+        <p><b>User:</b> ${username}</p>
+        <p><b>Amount:</b> GHS ${amount}</p>
+        <p><b>Method:</b> ${method}</p>
+        <p><b>MoMo Number:</b> ${address}</p>
+        <p><b>Time:</b> ${new Date().toLocaleString()}</p>
+        <br/>
+        <p>Login to your admin panel to approve or reject.</p>
+        <a href="https://foretell-bet.vercel.app/admin">Open Admin Panel</a>
+      `
+    });
+  } catch (err) {
+    console.error('Email notification failed:', err.message);
+  }
+}
 
 // Get balance
 router.get('/balance', async (req, res) => {
@@ -51,6 +84,9 @@ router.post('/withdraw', async (req, res) => {
       timestamp: new Date()
     });
     await tx.save();
+
+    // Send email notification
+    await sendWithdrawalEmail(req.user.username, withdrawAmount, method || 'momo', address);
 
     res.json({ success: true, message: 'Withdrawal request submitted.', newBalance: user.balance });
   } catch (err) {
