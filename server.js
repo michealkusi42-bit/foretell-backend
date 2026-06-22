@@ -89,7 +89,17 @@ const io = new Server(server, {
 });
 
 app.set('trust proxy', 1);
-app.use(helmet());
+
+// FIX: allow images under /uploads (e.g. avatars) to be loaded cross-origin
+// by the frontend. Default helmet() sets Cross-Origin-Resource-Policy:
+// same-origin, which silently blocks <img src> requests from a different
+// origin (e.g. www.fortellbet.com loading from the backend domain).
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+  })
+);
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
