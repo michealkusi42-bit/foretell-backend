@@ -4,6 +4,9 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
@@ -17,11 +20,11 @@ const offlineGameRoutes = require('./routes/offline-game');
 const paystackRoutes = require('./routes/paystack');
 const { authenticateToken } = require('./middleware/auth');
 const { registerGameHandlers } = require('./games/socketHandler');
+const { User } = require('./config/store');
 
 const adminRouter = adminModule.router || adminModule;
 const gameOverrides = adminModule.gameOverrides || { maintenanceMode: false };
 
-// ─── DEBUG: Find bad exports ──────────────────────────────────────────────────
 const routeMap = {
   authRoutes,
   walletRoutes,
@@ -39,7 +42,19 @@ Object.entries(routeMap).forEach(([name, r]) => {
     console.log(`✅ ${name} OK`);
   }
 });
-// ─────────────────────────────────────────────────────────────────────────────
+
+// ✅ NEW: avatar upload setup
+const avatarDir = path.join(__dirname, 'uploads', 'avatars');
+if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
+
+const avatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, avatarDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${req.user.username}-${Date.now()}${ext}`);
+  }
+});
+const uploadAvatar = multer({ storage: avatarStorage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 const app = express();
 const server = http.createServer(app);
@@ -82,6 +97,9 @@ app.options('*', cors(corsOptions));
 app.use('/api/paystack/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
+
+// ✅ NEW: serve uploaded avatar files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use('/api/games', (req, res, next) => {
   if (gameOverrides.maintenanceMode) return res.status(503).json({ error: 'Games under maintenance.' });
@@ -148,7 +166,23 @@ app.post('/api/withdraw', authenticateToken, (req, res) => res.json({ status: 'p
 app.get('/api/player/username', authenticateToken, (req, res) => res.json({}));
 app.patch('/api/player/username', authenticateToken, (req, res) => res.json({}));
 app.patch('/api/player/password', authenticateToken, (req, res) => res.json({}));
-app.patch('/api/player/avatar', authenticateToken, (req, res) => res.json({}));
+
+// ✅ UPDATED: avatar route now actually saves the uploaded file
+app.patch('/api/player/avatar', authenticateToken, uploadAvatar.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const avatarPath = `/uploads/avatars/${req.file.filename}`;
+    await User.findOneAndUpdate(
+      { username: req.user.username },
+      { avatar: avatarPath },
+      { new: true }
+    );
+    res.json({ avatar: avatarPath });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.patch('/api/player/currency', authenticateToken, (req, res) => res.json({}));
 app.get('/api/player/referral', authenticateToken, (req, res) => res.json({ code: '', count: 0 }));
 app.post('/api/nowpay/get-withdraw-currency', authenticateToken, (req, res) => res.json({}));
