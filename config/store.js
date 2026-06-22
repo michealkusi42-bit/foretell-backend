@@ -21,8 +21,9 @@ const userSchema = new mongoose.Schema({
   momoProvider: { type: String, default: 'mtn' }, // mtn, vodafone, tigo
   cryptoAddress: { type: String, default: '' },
   cryptoNetwork: { type: String, default: '' },
-  // ✅ NEW: profile avatar selection
+  // ✅ NEW: profile avatar
   avatarId: { type: String, default: 'default' },
+  avatar: { type: String, default: '' },
 });
 
 const transactionSchema = new mongoose.Schema({
