@@ -173,6 +173,8 @@ router.get('/me', authenticateToken, async (req, res) => {
       momoProvider: user.momoProvider || 'mtn',
       cryptoAddress: user.cryptoAddress || '',
       cryptoNetwork: user.cryptoNetwork || '',
+      // ✅ NEW: include avatar so the frontend can display it
+      avatar: user.avatar || '',
     });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
