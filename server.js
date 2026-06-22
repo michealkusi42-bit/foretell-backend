@@ -43,7 +43,6 @@ Object.entries(routeMap).forEach(([name, r]) => {
   }
 });
 
-// ✅ NEW: avatar upload setup
 const avatarDir = path.join(__dirname, 'uploads', 'avatars');
 if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
 
@@ -98,7 +97,6 @@ app.use('/api/paystack/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
-// ✅ NEW: serve uploaded avatar files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use('/api/games', (req, res, next) => {
@@ -167,11 +165,11 @@ app.get('/api/player/username', authenticateToken, (req, res) => res.json({}));
 app.patch('/api/player/username', authenticateToken, (req, res) => res.json({}));
 app.patch('/api/player/password', authenticateToken, (req, res) => res.json({}));
 
-// ✅ UPDATED: avatar route now actually saves the uploaded file
 app.patch('/api/player/avatar', authenticateToken, uploadAvatar.single('avatar'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const avatarPath = `/uploads/avatars/${req.file.filename}`;
+    // ✅ FIXED: removed leading slash to avoid double-slash in built URL
+    const avatarPath = `uploads/avatars/${req.file.filename}`;
     await User.findOneAndUpdate(
       { username: req.user.username },
       { avatar: avatarPath },
