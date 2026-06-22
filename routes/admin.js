@@ -7,6 +7,9 @@ const router = express.Router();
 const userGameOverrides = {};
 const gameOverrides = {};
 
+// WIN RATE — stored in memory (persists until server restart)
+let globalWinRate = 50; // default 50%
+
 function getUserOverride(username, game) {
   if (userGameOverrides[username] && userGameOverrides[username][game] !== undefined) {
     return userGameOverrides[username][game];
@@ -18,6 +21,14 @@ function clearUserOverride(username, game) {
   if (userGameOverrides[username]) {
     delete userGameOverrides[username][game];
   }
+}
+
+function getWinRate() {
+  return globalWinRate;
+}
+
+function shouldPlayerWin() {
+  return Math.random() * 100 < globalWinRate;
 }
 
 const loginLimiter = rateLimit({
@@ -46,6 +57,20 @@ function requireAdminPassword(req, res, next) {
 }
 
 router.use(requireAdminPassword);
+
+// ─── WIN RATE ─────────────────────────────────────────────────────────────────
+router.get('/win-rate', (req, res) => {
+  res.json({ success: true, winRate: globalWinRate });
+});
+
+router.post('/win-rate', (req, res) => {
+  const { winRate } = req.body;
+  if (winRate === undefined || winRate < 0 || winRate > 100) {
+    return res.status(400).json({ error: 'Win rate must be between 0 and 100' });
+  }
+  globalWinRate = Number(winRate);
+  res.json({ success: true, winRate: globalWinRate, message: 'Win rate updated to ' + globalWinRate + '%' });
+});
 
 // ─── DASHBOARD STATS ─────────────────────────────────────────────────────────
 router.get('/stats', async (req, res) => {
@@ -113,7 +138,7 @@ router.post('/deposits/:id/approve', async (req, res) => {
     tx.processedAt = new Date();
     await tx.save();
 
-    res.json({ success: true, message: `Deposit of GHS ${tx.amount} approved for ${tx.username}`, newBalance: user.balance });
+    res.json({ success: true, message: 'Deposit of GHS ' + tx.amount + ' approved for ' + tx.username, newBalance: user.balance });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -129,7 +154,7 @@ router.post('/deposits/:id/reject', async (req, res) => {
     tx.processedAt = new Date();
     await tx.save();
 
-    res.json({ success: true, message: `Deposit rejected for ${tx.username}` });
+    res.json({ success: true, message: 'Deposit rejected for ' + tx.username });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -158,7 +183,7 @@ router.post('/withdrawals/:id/approve', async (req, res) => {
     tx.processedAt = new Date();
     await tx.save();
 
-    res.json({ success: true, message: `Withdrawal of GHS ${tx.amount} approved for ${tx.username}` });
+    res.json({ success: true, message: 'Withdrawal of GHS ' + tx.amount + ' approved for ' + tx.username });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -180,7 +205,7 @@ router.post('/withdrawals/:id/reject', async (req, res) => {
     tx.processedAt = new Date();
     await tx.save();
 
-    res.json({ success: true, message: `Withdrawal rejected and refunded for ${tx.username}` });
+    res.json({ success: true, message: 'Withdrawal rejected and refunded for ' + tx.username });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -224,8 +249,8 @@ router.post('/users/:username/suspend', async (req, res) => {
       success: true,
       suspended: user.suspended,
       message: user.suspended
-        ? `${req.params.username} has been suspended`
-        : `${req.params.username} has been unsuspended`
+        ? req.params.username + ' has been suspended'
+        : req.params.username + ' has been unsuspended'
     });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -240,7 +265,7 @@ router.post('/overrides/:username', async (req, res) => {
       userGameOverrides[req.params.username] = {};
     }
     userGameOverrides[req.params.username][game] = value;
-    res.json({ success: true, message: `Override set: ${req.params.username} → ${game} → ${JSON.stringify(value)}` });
+    res.json({ success: true, message: 'Override set: ' + req.params.username + ' → ' + game + ' → ' + JSON.stringify(value) });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -259,7 +284,7 @@ router.delete('/overrides/:username/:game', async (req, res) => {
   if (userGameOverrides[req.params.username]) {
     delete userGameOverrides[req.params.username][req.params.game];
   }
-  res.json({ success: true, message: `Override cleared: ${req.params.username} → ${req.params.game}` });
+  res.json({ success: true, message: 'Override cleared: ' + req.params.username + ' → ' + req.params.game });
 });
 
-module.exports = { router, gameOverrides, getUserOverride, clearUserOverride };
+module.exports = { router, gameOverrides, getUserOverride, clearUserOverride, getWinRate, shouldPlayerWin };
