@@ -154,7 +154,19 @@ router.post('/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: 'Invalid password' });
     const token = jwt.sign({ username: user.username }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
-    res.json({ token, username: user.username, balance: user.balance });
+    // ✅ FIXED: return the same user fields as /me (especially avatar)
+    // so the frontend doesn't lose the avatar right after logging in.
+    res.json({
+      token,
+      username: user.username,
+      balance: user.balance,
+      email: user.email,
+      avatar: user.avatar || '',
+      momoNumber: user.momoNumber || '',
+      momoProvider: user.momoProvider || 'mtn',
+      cryptoAddress: user.cryptoAddress || '',
+      cryptoNetwork: user.cryptoNetwork || ''
+    });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
