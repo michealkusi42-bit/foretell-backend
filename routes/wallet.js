@@ -30,6 +30,64 @@ async function sendWithdrawalEmail(username, amount, network, address, accountNa
   }
 }
 
+// ✅ NEW: Email notification for MoMo deposits
+async function sendMoMoDepositEmail(username, amount, momoNetwork, momoNumber, momoName, reference) {
+  try {
+    await resend.emails.send({
+      from: 'Foretell <onboarding@resend.dev>',
+      to: 'michealkusi42@gmail.com',
+      subject: '💰 New MoMo Deposit Request - Foretell',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 20px; border-radius: 10px 10px 0 0;">
+            <h2 style="color: #00d4aa; margin: 0;">💰 New MoMo Deposit Request</h2>
+          </div>
+          <div style="background: #f9f9f9; padding: 20px; border-radius: 0 0 10px 10px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">User</td>
+                <td style="padding: 10px; color: #333;">${username}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Amount</td>
+                <td style="padding: 10px; color: #00d4aa; font-weight: bold; font-size: 18px;">GHS ${amount}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Network</td>
+                <td style="padding: 10px; color: #333;">${momoNetwork}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Sent To</td>
+                <td style="padding: 10px; color: #333;">${momoNumber} (${momoName})</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Transaction ID</td>
+                <td style="padding: 10px; color: #333; font-family: monospace;">${reference}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; color: #666; font-weight: bold;">Time</td>
+                <td style="padding: 10px; color: #333;">${new Date().toLocaleString()}</td>
+              </tr>
+            </table>
+            <br/>
+            <div style="text-align: center;">
+              <a href="https://foretell-bet.vercel.app/admin" 
+                 style="background: #00d4aa; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold;">
+                ✅ Open Admin Panel to Approve
+              </a>
+            </div>
+            <p style="color: #999; font-size: 12px; text-align: center; margin-top: 20px;">
+              Verify the transaction ID on your MoMo app before approving.
+            </p>
+          </div>
+        </div>
+      `
+    });
+  } catch (err) {
+    console.error('MoMo deposit email failed:', err.message);
+  }
+}
+
 // Get balance
 router.get('/balance', async (req, res) => {
   try {
@@ -78,7 +136,12 @@ router.get('/momo', async (req, res) => {
   try {
     const user = await User.findOne({ username: req.user.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json({ success: true, momoNetwork: user.momoNetwork || '', momoNumber: user.momoNumber || '', momoName: user.momoName || '' });
+    res.json({ 
+      success: true, 
+      momoNetwork: user.momoNetwork || '', 
+      momoNumber: user.momoNumber || '', 
+      momoName: user.momoName || '' 
+    });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
@@ -126,15 +189,29 @@ router.post('/withdraw', async (req, res) => {
   }
 });
 
-// Request deposit
+// ✅ UPDATED: Request deposit — now handles MoMo with email notification
 router.post('/deposit', async (req, res) => {
   try {
-    const { amount, method, reference } = req.body;
+    const { amount, method, reference, momoNumber, momoNetwork } = req.body;
     const user = await User.findOne({ username: req.user.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const depositAmount = parseFloat(amount);
     if (!depositAmount || depositAmount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+    if (depositAmount < 1) return res.status(400).json({ error: 'Minimum deposit is GHS 1' });
+
+    // ✅ For MoMo deposits, require a reference/transaction ID
+    if (method === 'momo' && !reference) {
+      return res.status(400).json({ error: 'Transaction ID is required for MoMo deposits' });
+    }
+
+    // Check for duplicate transaction ID
+    if (reference) {
+      const existing = await Transaction.findOne({ id: reference });
+      if (existing) {
+        return res.status(400).json({ error: 'This transaction ID has already been used' });
+      }
+    }
 
     const tx = new Transaction({
       id: reference || Date.now().toString(),
@@ -142,12 +219,35 @@ router.post('/deposit', async (req, res) => {
       type: 'deposit',
       amount: depositAmount,
       method: method || 'momo',
+      address: momoNumber || '',
       status: 'pending',
       timestamp: new Date()
     });
     await tx.save();
 
-    res.json({ success: true, message: 'Deposit request submitted.' });
+    // ✅ Send email to admin for MoMo deposits
+    if (method === 'momo' && momoNumber) {
+      // Find which agent name this number belongs to
+      const agentMap = {
+        '0507558973': 'Kotey Rudolph Glodean',
+        '0507210550': 'Atoklo Christian',
+        '0508631503': 'Tetteh Vida',
+        '0560972009': 'Fatima Iddrisu',
+        '0560190029': 'Fatima Iddrisu',
+      };
+      const agentName = agentMap[momoNumber] || 'Unknown';
+
+      await sendMoMoDepositEmail(
+        req.user.username,
+        depositAmount,
+        momoNetwork || 'MoMo',
+        momoNumber,
+        agentName,
+        reference
+      );
+    }
+
+    res.json({ success: true, message: 'Deposit request submitted. Admin will confirm shortly.' });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
