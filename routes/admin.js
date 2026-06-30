@@ -1,8 +1,12 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { User, Transaction } = require('../config/store');
+const { Resend } = require('resend');
 
 const router = express.Router();
+
+// Matches the same Resend setup already used in routes/wallet.js
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 const userGameOverrides = {};
 const gameOverrides = {};
@@ -29,6 +33,65 @@ function getWinRate() {
 
 function shouldPlayerWin() {
   return Math.random() * 100 < globalWinRate;
+}
+
+// ─── EMAIL: Deposit confirmation (sent to the USER, not the admin) ─────────
+async function sendDepositConfirmationEmail({ to, name, amount, network, reference, newBalance }) {
+  if (!to) {
+    console.warn('User has no email on file — skipping deposit confirmation email');
+    return;
+  }
+
+  const dateStr = new Date().toLocaleString();
+
+  try {
+    await resend.emails.send({
+      from: 'Foretell <onboarding@resend.dev>',
+      to,
+      subject: '✅ Deposit Confirmed - GHS ' + amount + ' Credited',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 20px; border-radius: 10px 10px 0 0;">
+            <h2 style="color: #00d4aa; margin: 0;">✅ Deposit Confirmed</h2>
+          </div>
+          <div style="background: #f9f9f9; padding: 20px; border-radius: 0 0 10px 10px;">
+            <p style="color: #333;">Dear ${name || 'Valued Customer'},</p>
+            <p style="color: #333;">We're writing to confirm that your deposit has been successfully processed and credited to your Foretell account.</p>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Amount</td>
+                <td style="padding: 10px; color: #00d4aa; font-weight: bold; font-size: 18px;">GHS ${amount}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Payment Method</td>
+                <td style="padding: 10px; color: #333;">${network} Mobile Money</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Transaction Reference</td>
+                <td style="padding: 10px; color: #333; font-family: monospace;">${reference}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 10px; color: #666; font-weight: bold;">Date</td>
+                <td style="padding: 10px; color: #333;">${dateStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; color: #666; font-weight: bold;">New Wallet Balance</td>
+                <td style="padding: 10px; color: #00b894; font-weight: bold; font-size: 18px;">GHS ${newBalance}</td>
+              </tr>
+            </table>
+            <p style="color: #333; margin-top: 20px;">Your funds are now available for use on the platform. If you did not initiate this transaction, please contact our support team immediately.</p>
+            <p style="color: #333;">Thank you for choosing Foretell.</p>
+            <p style="color: #333;">Best regards,<br/>The Foretell Team</p>
+            <p style="color: #999; font-size: 12px; text-align: center; margin-top: 20px;">
+              support@fortellbet.com | fortellbet.com
+            </p>
+          </div>
+        </div>
+      `
+    });
+  } catch (err) {
+    console.error('Deposit confirmation email failed:', err.message);
+  }
 }
 
 const loginLimiter = rateLimit({
@@ -137,6 +200,16 @@ router.post('/deposits/:id/approve', async (req, res) => {
     tx.status = 'success';
     tx.processedAt = new Date();
     await tx.save();
+
+    // Fire-and-forget — don't block the admin response on email delivery
+    sendDepositConfirmationEmail({
+      to: user.email,
+      name: user.username,
+      amount: tx.amount,
+      network: tx.momoNetwork || 'Mobile Money',
+      reference: tx.reference || tx.id,
+      newBalance: user.balance
+    });
 
     res.json({ success: true, message: 'Deposit of GHS ' + tx.amount + ' approved for ' + tx.username, newBalance: user.balance });
   } catch (err) {
