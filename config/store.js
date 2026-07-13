@@ -18,12 +18,15 @@ const userSchema = new mongoose.Schema({
   freeSpinsBalance: { type: Number, default: 0 },
   // ✅ Saved payment details
   momoNumber: { type: String, default: '' },
-  momoProvider: { type: String, default: 'mtn' }, // mtn, vodafone, tigo
+  momoProvider: { type: String, default: 'mtn' },
+  momoNetwork: { type: String, default: '' }, // MTN, Telecel, AirtelTigo
   cryptoAddress: { type: String, default: '' },
   cryptoNetwork: { type: String, default: '' },
-  // ✅ NEW: profile avatar
+  // ✅ Profile avatar
   avatarId: { type: String, default: 'default' },
   avatar: { type: String, default: '' },
+  // ✅ NEW: track when user registered
+  createdAt: { type: Date, default: Date.now },
 });
 
 const transactionSchema = new mongoose.Schema({
