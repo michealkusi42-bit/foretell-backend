@@ -17,7 +17,6 @@ const affiliateRoutes = require('./routes/affiliates');
 const vipSpinRoutes = require('./routes/vip-spin');
 const adminModule = require('./routes/admin');
 const offlineGameRoutes = require('./routes/offline-game');
-const paystackRoutes = require('./routes/paystack');
 const { authenticateToken } = require('./middleware/auth');
 const { registerGameHandlers } = require('./games/socketHandler');
 const { User } = require('./config/store');
@@ -33,7 +32,6 @@ const routeMap = {
   affiliateRoutes,
   vipSpinRoutes,
   offlineGameRoutes,
-  paystackRoutes,
 };
 Object.entries(routeMap).forEach(([name, r]) => {
   if (typeof r !== 'function') {
@@ -90,10 +88,6 @@ const io = new Server(server, {
 
 app.set('trust proxy', 1);
 
-// FIX: allow images under /uploads (e.g. avatars) to be loaded cross-origin
-// by the frontend. Default helmet() sets Cross-Origin-Resource-Policy:
-// same-origin, which silently blocks <img src> requests from a different
-// origin (e.g. www.fortellbet.com loading from the backend domain).
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' }
@@ -103,7 +97,6 @@ app.use(
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-app.use('/api/paystack/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
@@ -143,7 +136,6 @@ app.use('/api/affiliates', affiliateRoutes);
 app.use('/api/vip-spin', vipSpinRoutes);
 app.use('/api/admin', adminRouter);
 app.use('/api/offline-game', offlineGameRoutes);
-app.use('/api/paystack', paystackRoutes);
 
 app.get('/api/setting/site', (req, res) => res.json({}));
 app.get('/api/casino/recommend', (req, res) => res.json(mockGames));
@@ -178,7 +170,6 @@ app.patch('/api/player/password', authenticateToken, (req, res) => res.json({}))
 app.patch('/api/player/avatar', authenticateToken, uploadAvatar.single('avatar'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    // ✅ FIXED: removed leading slash to avoid double-slash in built URL
     const avatarPath = `uploads/avatars/${req.file.filename}`;
     await User.findOneAndUpdate(
       { username: req.user.username },
