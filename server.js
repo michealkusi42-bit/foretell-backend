@@ -82,14 +82,15 @@ const io = new Server(server, {
 
 app.set('trust proxy', 1);
 
+// CORS must come BEFORE helmet so preflight OPTIONS requests are not blocked
+app.use(cors({ origin: true, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-password'] }));
+app.options('*', cors({ origin: true, credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key', 'x-admin-password'] }));
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' }
   })
 );
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
 
 app.use(express.json());
 app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
