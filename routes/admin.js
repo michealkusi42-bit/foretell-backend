@@ -189,7 +189,11 @@ router.post('/deposits/:id/approve', async (req, res) => {
   try {
     const tx = await Transaction.findOne({ id: req.params.id, type: 'deposit' });
     if (!tx) return res.status(404).json({ error: 'Transaction not found' });
-    if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+
+    // ✅ FIX: accept both 'pending' and 'under_review' so approve never gets stuck
+    if (tx.status !== 'pending' && tx.status !== 'under_review') {
+      return res.status(400).json({ error: 'Already processed' });
+    }
 
     const user = await User.findOne({ username: tx.username });
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -206,7 +210,7 @@ router.post('/deposits/:id/approve', async (req, res) => {
       to: user.email,
       name: user.username,
       amount: tx.amount,
-      network: tx.momoNetwork || 'Mobile Money',
+      network: tx.momoNetwork || tx.network || 'Mobile Money',
       reference: tx.reference || tx.id,
       newBalance: user.balance
     });
@@ -221,7 +225,9 @@ router.post('/deposits/:id/reject', async (req, res) => {
   try {
     const tx = await Transaction.findOne({ id: req.params.id, type: 'deposit' });
     if (!tx) return res.status(404).json({ error: 'Transaction not found' });
-    if (tx.status !== 'pending') return res.status(400).json({ error: 'Already processed' });
+    if (tx.status !== 'pending' && tx.status !== 'under_review') {
+      return res.status(400).json({ error: 'Already processed' });
+    }
 
     tx.status = 'rejected';
     tx.processedAt = new Date();
@@ -285,10 +291,119 @@ router.post('/withdrawals/:id/reject', async (req, res) => {
 });
 
 // ─── USERS ───────────────────────────────────────────────────────────────────
+
+// ✅ UPDATED: returns enriched user list with stats per user
 router.get('/users', async (req, res) => {
   try {
     const users = await User.find({}, { password: 0 }).sort({ balance: -1 });
-    res.json({ success: true, data: users });
+
+    // Pull transaction stats for all users in one query
+    const usernames = users.map(u => u.username);
+
+    const depositStats = await Transaction.aggregate([
+      { $match: { username: { $in: usernames }, type: 'deposit', status: 'success' } },
+      { $group: { _id: '$username', totalDeposited: { $sum: '$amount' }, depositCount: { $sum: 1 } } }
+    ]);
+
+    const withdrawalStats = await Transaction.aggregate([
+      { $match: { username: { $in: usernames }, type: 'withdraw', status: 'success' } },
+      { $group: { _id: '$username', totalWithdrawn: { $sum: '$amount' }, withdrawalCount: { $sum: 1 } } }
+    ]);
+
+    const betStats = await Transaction.aggregate([
+      { $match: { username: { $in: usernames }, type: { $in: ['coinflip','dice','hilo','mines','roulette','updown','crash','lottery','racing','bingo','poker'] } } },
+      { $group: { _id: '$username', totalBets: { $sum: 1 }, totalWagered: { $sum: '$bet' } } }
+    ]);
+
+    // Map stats by username for fast lookup
+    const depositMap   = Object.fromEntries(depositStats.map(d => [d._id, d]));
+    const withdrawMap  = Object.fromEntries(withdrawalStats.map(d => [d._id, d]));
+    const betMap       = Object.fromEntries(betStats.map(d => [d._id, d]));
+
+    const enriched = users.map(u => ({
+      username:        u.username,
+      email:           u.email || '—',
+      phone:           u.momoNumber || '—',
+      momoNetwork:     u.momoNetwork || u.momoProvider || '—',
+      balance:         u.balance,
+      suspended:       u.suspended,
+      isAdmin:         u.isAdmin,
+      referralCode:    u.referralCode || '—',
+      referredBy:      u.referredBy || '—',
+      referralCount:   u.referralCount || 0,
+      referralEarnings: u.referralEarnings || 0,
+      joinedAt:        u.createdAt || null,
+      // deposit stats
+      totalDeposited:  depositMap[u.username]?.totalDeposited || 0,
+      depositCount:    depositMap[u.username]?.depositCount   || 0,
+      // withdrawal stats
+      totalWithdrawn:  withdrawMap[u.username]?.totalWithdrawn  || 0,
+      withdrawalCount: withdrawMap[u.username]?.withdrawalCount || 0,
+      // bet stats
+      totalBets:       betMap[u.username]?.totalBets     || 0,
+      totalWagered:    betMap[u.username]?.totalWagered  || 0,
+    }));
+
+    res.json({ success: true, data: enriched });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ✅ NEW: single user detail lookup
+router.get('/users/:username', async (req, res) => {
+  try {
+    const user = await User.findOne({ username: req.params.username }, { password: 0 });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const [depositStats] = await Transaction.aggregate([
+      { $match: { username: user.username, type: 'deposit', status: 'success' } },
+      { $group: { _id: null, totalDeposited: { $sum: '$amount' }, depositCount: { $sum: 1 } } }
+    ]);
+
+    const [withdrawalStats] = await Transaction.aggregate([
+      { $match: { username: user.username, type: 'withdraw', status: 'success' } },
+      { $group: { _id: null, totalWithdrawn: { $sum: '$amount' }, withdrawalCount: { $sum: 1 } } }
+    ]);
+
+    const [betStats] = await Transaction.aggregate([
+      { $match: { username: user.username, type: { $in: ['coinflip','dice','hilo','mines','roulette','updown','crash','lottery','racing','bingo','poker'] } } },
+      { $group: { _id: null, totalBets: { $sum: 1 }, totalWagered: { $sum: '$bet' }, totalPayout: { $sum: '$payout' } } }
+    ]);
+
+    const recentTransactions = await Transaction.find({ username: user.username })
+      .sort({ timestamp: -1 })
+      .limit(20);
+
+    res.json({
+      success: true,
+      data: {
+        username:         user.username,
+        email:            user.email || '—',
+        phone:            user.momoNumber || '—',
+        momoNetwork:      user.momoNetwork || user.momoProvider || '—',
+        balance:          user.balance,
+        suspended:        user.suspended,
+        isAdmin:          user.isAdmin,
+        referralCode:     user.referralCode || '—',
+        referredBy:       user.referredBy || '—',
+        referralCount:    user.referralCount || 0,
+        referralEarnings: user.referralEarnings || 0,
+        joinedAt:         user.createdAt || null,
+        // deposit stats
+        totalDeposited:   depositStats?.totalDeposited  || 0,
+        depositCount:     depositStats?.depositCount    || 0,
+        // withdrawal stats
+        totalWithdrawn:   withdrawalStats?.totalWithdrawn  || 0,
+        withdrawalCount:  withdrawalStats?.withdrawalCount || 0,
+        // bet stats
+        totalBets:        betStats?.totalBets    || 0,
+        totalWagered:     betStats?.totalWagered || 0,
+        totalPayout:      betStats?.totalPayout  || 0,
+        // last 20 transactions
+        recentTransactions,
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
