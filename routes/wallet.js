@@ -1,4 +1,5 @@
 const express = require('express');
+const { randomUUID } = require('crypto');
 const { Resend } = require('resend');
 const { User, Transaction } = require('../config/store');
 
@@ -170,7 +171,7 @@ router.post('/withdraw', async (req, res) => {
     await user.save();
 
     const tx = new Transaction({
-      id: Date.now().toString(),
+      id: randomUUID(),
       username: req.user.username,
       type: 'withdraw',
       amount: withdrawAmount,
@@ -205,16 +206,17 @@ router.post('/deposit', async (req, res) => {
       return res.status(400).json({ error: 'Transaction ID is required for MoMo deposits' });
     }
 
-    // Check for duplicate transaction ID
+    // Check for duplicate transaction ID (reference is the pasted SMS/trans ID, not the record's own id)
     if (reference) {
-      const existing = await Transaction.findOne({ id: reference });
+      const existing = await Transaction.findOne({ reference });
       if (existing) {
         return res.status(400).json({ error: 'This transaction ID has already been used' });
       }
     }
 
     const tx = new Transaction({
-      id: reference || Date.now().toString(),
+      id: randomUUID(),          // always a real, unique, URL-safe ID
+      reference: reference || '', // the pasted MoMo SMS / transaction ID text, stored separately
       username: req.user.username,
       type: 'deposit',
       amount: depositAmount,
